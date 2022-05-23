@@ -328,6 +328,7 @@ class gpgpu_sim_config : public power_config,
     m_valid = false;
     gpgpu_ctx = ctx;
   }
+
   void reg_options(class OptionParser *opp);
   void init() {
     gpu_stat_sample_freq = 10000;
@@ -389,6 +390,9 @@ class gpgpu_sim_config : public power_config,
   double icnt_period;
   double dram_period;
   double l2_period;
+  double* cluster_period;
+  double* cluster_freq;
+
 
   // GPGPU-Sim timing model options
   unsigned long long gpu_max_cycle_opt;
@@ -482,12 +486,14 @@ class gpgpu_sim : public gpgpu_t {
   gpgpu_sim(const gpgpu_sim_config &config, gpgpu_context *ctx);
 
   void set_prop(struct cudaDeviceProp *prop);
-
+  void data_collect(int);
+  void New_freq();
   void launch(kernel_info_t *kinfo);
   bool can_start_kernel();
   unsigned finished_kernel();
   void set_kernel_done(kernel_info_t *kernel);
   void stop_all_running_kernels();
+
 
   void init();
   void cycle();
@@ -564,12 +570,14 @@ class gpgpu_sim : public gpgpu_t {
 
   // backward pointer
   class gpgpu_context *gpgpu_ctx;
+    double *cluster_time;
+    bool *cluster_all;
 
  private:
   // clocks
   void reinit_clock_domains(void);
   int next_clock_domain(void);
-  void issue_block2core();
+  void issue_block2core(int);
   void print_dram_stats(FILE *fout) const;
   void shader_print_runtime_stat(FILE *fout);
   void shader_print_l1_miss_stat(FILE *fout) const;
@@ -604,6 +612,10 @@ class gpgpu_sim : public gpgpu_t {
   double icnt_time;
   double dram_time;
   double l2_time;
+  float* numb_active_sms;
+
+  const shader_core_config *m_shader_config;
+
 
   // debug
   bool gpu_deadlock;
@@ -612,13 +624,14 @@ class gpgpu_sim : public gpgpu_t {
   const gpgpu_sim_config &m_config;
 
   const struct cudaDeviceProp *m_cuda_properties;
-  const shader_core_config *m_shader_config;
+
   const memory_config *m_memory_config;
 
   // stats
   class shader_core_stats *m_shader_stats;
   class memory_stats_t *m_memory_stats;
   class power_stat_t *m_power_stats;
+  //class power_stat_t_per_core *m_power_stats;
   class gpgpu_sim_wrapper *m_gpgpusim_wrapper;
   unsigned long long last_gpu_sim_insn;
 

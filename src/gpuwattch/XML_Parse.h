@@ -619,6 +619,7 @@ typedef struct {
   // All number_of_* at the level of 'system' Ying 03/21/2009
   int GPU_Architecture;
   int number_of_cores;
+
   int architecture;
   int number_of_L1Directories;
   int number_of_L2Directories;
@@ -661,6 +662,8 @@ typedef struct {
   int virtual_memory_page_size;
   double idle_core_power;
   double num_idle_cores;
+
+  double idle_core_power_cluster[64];
   int arch;
   double total_cycles;
   // system.core(0-n):3rd level

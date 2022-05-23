@@ -107,7 +107,7 @@ Processor::Processor(ParseXML *XML_interface)
     numL2Dir = procdynp.numL2Dir == 0 ? 0 : 1;
   else
     numL2Dir = procdynp.numL2Dir;
-
+    printf("\nnumber of the cores in proc->cores in processor file: %d\n",numCore);
   for (i = 0; i < numCore; i++) {
     cores.push_back(new Core(XML, i, &interface_ip));
     cores[i]->computeEnergy();
@@ -477,7 +477,7 @@ Processor::Processor(ParseXML *XML_interface)
   //  final nodes globalClock.optimize_wire();
 }
 
-void Processor::compute() {
+void Processor::compute(bool loop) {
   int i;
   double pppm_t[4] = {1, 1, 1, 1};
 
@@ -486,11 +486,20 @@ void Processor::compute() {
   // core.power.reset();
 
   core.rt_power.reset();
+  for(int i=0;i<6;i++){
+    printf("\nCore %d total cycle=%lf",i, XML->sys.core[i].total_cycles);
+  }
   for (i = 0; i < numCore; i++) {
+printf("\nnumber of the cores in processor file is: %d read is %lf",numCore, cores[i]->rt_power.readOp.dynamic);
     cores[i]->executionTime =
-        XML->sys.total_cycles / (XML->sys.core[i].clock_rate * 1e6);
+        XML->sys.total_cycles / ((double)(XML->sys.core[i].clock_rate));
+    printf("\nexecution time calculated in processor.compute is %lf",cores[i]->executionTime);
+
+    cores[i]->executionTime = cores[i]->executionTime/(double)(1<<20);
+    printf("\nclock rate: %d execution time: %2.10lf total cycle in processor file %lf",XML->sys.core[i].clock_rate ,cores[i]->executionTime,XML->sys.total_cycles);
     cores[i]->rt_power.reset();
-    cores[i]->compute();
+      printf("\nnumber of the cores in processor file is: %d read is %dl",numCore, cores[i]->rt_power.readOp.dynamic);
+    cores[i]->compute(loop);
     // cores[i]->computeEnergy(false);
     if (procdynp.homoCore) {
       set_pppm(pppm_t, 1 / cores[i]->executionTime, procdynp.numCore,

@@ -137,7 +137,7 @@ power_core_stat_t::power_core_stat_t(const shader_core_config *shader_config,
   shader_core_power_stats_pod *pod = this;
   memset(pod, 0, sizeof(shader_core_power_stats_pod));
   m_core_stats = core_stats;
-
+    printf("\nnumber of shaders in power stats file: %d",m_config->num_shader());
   init();
 }
 
@@ -147,6 +147,7 @@ void power_core_stat_t::print(FILE *fout) {
   // per core statistics
   fprintf(fout, "Power Metrics: \n");
   for (unsigned i = 0; i < m_config->num_shader(); i++) {
+printf("\nnumber of shaders in p[ower vstats file: %d",m_config->num_shader());
     fprintf(fout, "core %u:\n", i);
     fprintf(fout, "\tpipeline duty cycle =%f\n",
             m_pipeline_duty_cycle[CURRENT_STAT_IDX][i]);
@@ -353,7 +354,7 @@ power_stat_t::power_stat_t(const shader_core_config *shader_config,
   pwr_mem_stat = new power_mem_stat_t(mem_config, shader_config, memory_stats,
                                       shader_stats);
   m_average_pipeline_duty_cycle = average_pipeline_duty_cycle;
-  m_active_sms = active_sms;
+    m_active_sms = active_sms;
   m_config = shader_config;
   m_mem_config = mem_config;
 }

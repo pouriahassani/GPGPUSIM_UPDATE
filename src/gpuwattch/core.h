@@ -548,7 +548,7 @@ class Core : public Component {
     // return 1.5*value;
   }
 
-  void compute();
+  void compute(bool);
   ~Core();
 };
 

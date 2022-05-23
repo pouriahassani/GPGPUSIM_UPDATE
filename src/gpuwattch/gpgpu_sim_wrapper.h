@@ -56,7 +56,7 @@ struct avg_max_min_counters {
 
 class gpgpu_sim_wrapper {
  public:
-  gpgpu_sim_wrapper(bool power_simulation_enabled, char* xmlfile);
+  gpgpu_sim_wrapper(bool power_simulation_enabled, char* xmlfile,unsigned number_shader,double *);
   ~gpgpu_sim_wrapper();
 
   void init_mcpat(char* xmlfile, char* powerfile, char* power_trace_file,
@@ -68,12 +68,17 @@ class gpgpu_sim_wrapper {
   void detect_print_steady_state(int position, double init_val);
   void close_files();
   void open_files();
-  void compute();
+  void compute(bool);
   void dump();
   void print_trace_files();
-  void update_components_power();
+  void update_components_power(int x);
+  void update_components_power_per_core(bool);
+  void update_coefficients_per_core();
+  void smp_cpm_pwr_print();
   void update_coefficients();
   void reset_counters();
+  ParseXML* return_p();
+
   void print_power_kernel_stats(double gpu_sim_cycle, double gpu_tot_sim_cycle,
                                 double init_value,
                                 const std::string& kernel_info_string,
@@ -82,30 +87,37 @@ class gpgpu_sim_wrapper {
   void set_inst_power(bool clk_gated_lanes, double tot_cycles,
                       double busy_cycles, double tot_inst, double int_inst,
                       double fp_inst, double load_inst, double store_inst,
-                      double committed_inst);
-  void set_regfile_power(double reads, double writes, double ops);
+                      double committed_inst,double *,double *,double *,double *,double *);
+  void set_regfile_power(double reads, double writes, double ops,double *,double *,double *);
   void set_icache_power(double accesses, double misses);
   void set_ccache_power(double accesses, double misses);
   void set_tcache_power(double accesses, double misses);
-  void set_shrd_mem_power(double accesses);
+  void set_shrd_mem_power(double accesses,double *);
   void set_l1cache_power(double read_accesses, double read_misses,
                          double write_accesses, double write_misses);
   void set_l2cache_power(double read_accesses, double read_misses,
                          double write_accesses, double write_misses);
-  void set_idle_core_power(double num_idle_core);
+  void set_idle_core_power(double num_idle_core,float*);
   void set_duty_cycle_power(double duty_cycle);
   void set_mem_ctrl_power(double reads, double writes, double dram_precharge);
   void set_exec_unit_power(double fpu_accesses, double ialu_accesses,
-                           double sfu_accesses);
+                           double sfu_accesses,double *,double *,double *);
   void set_active_lanes_power(double sp_avg_active_lane,
-                              double sfu_avg_active_lane);
+                              double sfu_avg_active_lane,float *,float *,int);
   void set_NoC_power(double noc_tot_reads, double noc_tot_write);
   bool sanity_check(double a, double b);
-
+  double * cluster_freq;
+  double *power_per_core;
+  double per_core_power_calculation(double *Cluster_freq);
+  unsigned number_shaders;
+  double sum_pwr_cores;
+    Processor** proc_cores;
+    ParseXML** p_cores;
  private:
   void print_steady_state(int position, double init_val);
 
   Processor* proc;
+
   ParseXML* p;
   // power parameters
   double const_dynamic_power;
@@ -131,6 +143,7 @@ class gpgpu_sim_wrapper {
   bool has_written_avg;
 
   std::vector<double> sample_cmp_pwr;  // Current sample component powers
+  std::vector<vector<double>> sample_cmp_pwr_per_core;
   std::vector<double>
       sample_perf_counters;  // Current sample component perf. counts
   std::vector<double> initpower_coeff;
@@ -163,6 +176,10 @@ class gpgpu_sim_wrapper {
   gzFile power_trace_file;
   gzFile metric_trace_file;
   gzFile steady_state_tacking_file;
+
+
+
+
 };
 
 #endif /* GPGPU_SIM_WRAPPER_H_ */

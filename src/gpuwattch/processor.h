@@ -79,7 +79,7 @@ class Processor : public Component {
       flashcontrollers;
   int numCore, numL2, numL3, numNOC, numL1Dir, numL2Dir;
   Processor(ParseXML *XML_interface);
-  void compute();
+  void compute(bool);
   void set_proc_param();
   void visualizer_print(gzFile visualizer_file);
   void displayEnergy(uint32_t indent = 0, int plevel = 100,

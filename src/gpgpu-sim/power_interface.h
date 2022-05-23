@@ -43,7 +43,13 @@ void mcpat_cycle(const gpgpu_sim_config &config,
                  class gpgpu_sim_wrapper *wrapper,
                  class power_stat_t *power_stats, unsigned stat_sample_freq,
                  unsigned tot_cycle, unsigned cycle, unsigned tot_inst,
-                 unsigned inst);
+                 unsigned inst,class simt_core_cluster **,int,float*,double*);
 void mcpat_reset_perf_count(class gpgpu_sim_wrapper *wrapper);
+void mcpat_cycle_power_calculation(const gpgpu_sim_config &config,
+                                   const shader_core_config *shdr_config,
+                                   class gpgpu_sim_wrapper *wrapper,
+                                   class power_stat_t *power_stats, unsigned stat_sample_freq,
+                                   unsigned tot_cycle, unsigned cycle, unsigned tot_inst,
+                                   unsigned inst,class simt_core_cluster **m_cluster,int shaders_per_cluster,float* numb_active_sms,double * cluster_freq,float*);
 
 #endif /* POWER_INTERFACE_H_ */

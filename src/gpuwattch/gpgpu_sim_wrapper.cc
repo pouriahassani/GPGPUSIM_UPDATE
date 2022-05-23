@@ -59,7 +59,7 @@ enum pwr_cmp_t {
 };
 
 gpgpu_sim_wrapper::gpgpu_sim_wrapper(bool power_simulation_enabled,
-                                     char* xmlfile) {
+                                     char* xmlfile,unsigned number_shader,double* m_cluster_freq) {
   kernel_sample_count = 0;
   total_sample_count = 0;
 
@@ -67,7 +67,8 @@ gpgpu_sim_wrapper::gpgpu_sim_wrapper(bool power_simulation_enabled,
 
   num_pwr_cmps = NUM_COMPONENTS_MODELLED;
   num_perf_counters = NUM_PERFORMANCE_COUNTERS;
-
+  number_shaders = number_shader;
+ // printf("\nnum_pwr_cmps in wrapper.cc:%d",NUM_COMPONENTS_MODELLED);
   // Initialize per-component counter/power vectors
   avg_max_min_counters<double> init;
   kernel_cmp_pwr.resize(NUM_COMPONENTS_MODELLED, init);
@@ -77,14 +78,16 @@ gpgpu_sim_wrapper::gpgpu_sim_wrapper(bool power_simulation_enabled,
   gpu_tot_power = init;  // Global powers
 
   sample_cmp_pwr.resize(NUM_COMPONENTS_MODELLED, 0);
-
+  sample_cmp_pwr_per_core.resize(number_shader);
+  for(int i=0;i<number_shader;i++)
+    sample_cmp_pwr_per_core[i].resize(NUM_COMPONENTS_MODELLED,0);
+  //printf("\nnumber of shader %d",number_shader);
   sample_perf_counters.resize(NUM_PERFORMANCE_COUNTERS, 0);
   initpower_coeff.resize(NUM_PERFORMANCE_COUNTERS, 0);
   effpower_coeff.resize(NUM_PERFORMANCE_COUNTERS, 0);
 
   const_dynamic_power = 0;
   proc_power = 0;
-
   g_power_filename = NULL;
   g_power_trace_filename = NULL;
   g_metric_trace_filename = NULL;
@@ -97,13 +100,29 @@ gpgpu_sim_wrapper::gpgpu_sim_wrapper(bool power_simulation_enabled,
   g_power_per_cycle_dump = false;
   gpu_steady_power_deviation = 0;
   gpu_steady_min_period = 0;
-
+  cluster_freq = m_cluster_freq;
   gpu_stat_sample_freq = 0;
   p = new ParseXML();
+  p_cores = (ParseXML**)malloc(sizeof(ParseXML*)*number_shader);
+  power_per_core = (double*)malloc(sizeof(double)*number_shader);
   if (g_power_simulation_enabled) {
     p->parse(xml_filename);
+//    p->sys.core[0].clock_rate = (int)(cluster_freq[0]/1000000);
+    for(int i=0;i<number_shader;i++) {
+      p_cores[i] = new ParseXML();
+      p_cores[i]->parse(xml_filename);
+      p_cores[i]->sys.core[0].clock_rate = (int)(cluster_freq[i]/((1<<20)));
+
+    }
   }
   proc = new Processor(p);
+  proc_cores = new Processor*[number_shader];
+
+  for(int i=0;i<number_shader;i++)
+  {
+    proc_cores[i] = new Processor(p_cores[i]);
+
+  }
   power_trace_file = NULL;
   metric_trace_file = NULL;
   steady_state_tacking_file = NULL;
@@ -162,6 +181,10 @@ void gpgpu_sim_wrapper::init_mcpat(
 
     // p->sys.total_cycles=gpu_stat_sample_freq*4;
     p->sys.total_cycles = gpu_stat_sample_freq;
+    for(int i=0;i<number_shaders;i++)
+      p_cores[i]->sys.total_cycles = gpu_stat_sample_freq*cluster_freq[i]/cluster_freq[0];
+
+
     power_trace_file = NULL;
     metric_trace_file = NULL;
     steady_state_tacking_file = NULL;
@@ -226,6 +249,8 @@ void gpgpu_sim_wrapper::reset_counters() {
   for (unsigned i = 0; i < num_pwr_cmps; ++i) {
     sample_cmp_pwr[i] = 0;
     kernel_cmp_pwr[i] = init;
+    for (int j=0;j<number_shaders;j++)
+      sample_cmp_pwr_per_core[j][i] = 0;
   }
 
   // Reset per-kernel counters
@@ -235,15 +260,47 @@ void gpgpu_sim_wrapper::reset_counters() {
 
   return;
 }
+ParseXML* gpgpu_sim_wrapper::return_p() {
+  return p;
+}
+
 
 void gpgpu_sim_wrapper::set_inst_power(bool clk_gated_lanes, double tot_cycles,
                                        double busy_cycles, double tot_inst,
                                        double int_inst, double fp_inst,
                                        double load_inst, double store_inst,
-                                       double committed_inst) {
+                                       double committed_inst,
+                                       double *tot_ins_set_inst_power,double *total_int_ins_set_inst_power,
+                                       double *tot_fp_ins_set_inst_power,double *tot_commited_ins_set_inst_power,double* cluster_freq) {
+
+  p->sys.core[0].clock_rate =  (int)(cluster_freq[0]/((1<<20)));
   p->sys.core[0].gpgpu_clock_gated_lanes = clk_gated_lanes;
   p->sys.core[0].total_cycles = tot_cycles;
   p->sys.core[0].busy_cycles = busy_cycles;
+FILE * file;
+file = fopen("/home/pouria/Desktop/G_GPU/original_freq_per_sm/src/gpgpu-sim/total_cycle.txt","a");
+fprintf(file,"\n");
+
+  for(int i=0;i<number_shaders;i++)
+  {
+     printf("\nclock rate wrapper is : %d",p_cores[i]->sys.core[0].clock_rate);
+    p_cores[i]->sys.core[0].clock_rate =  (int)(cluster_freq[i]/((1<<20)));
+    p_cores[i]->sys.total_cycles = tot_cycles*cluster_freq[i]/cluster_freq[0];
+    p_cores[i]->sys.core[0].gpgpu_clock_gated_lanes = clk_gated_lanes;
+    p_cores[i]->sys.core[0].total_cycles = tot_cycles*cluster_freq[i]/cluster_freq[0];
+    p_cores[i]->sys.core[0].busy_cycles = busy_cycles*cluster_freq[i]/cluster_freq[0];
+    p_cores[i]->sys.core[0].total_instructions =
+        tot_ins_set_inst_power[i] * p_cores[i]->sys.scaling_coefficients[TOT_INST];
+    p_cores[i]->sys.core[0].int_instructions =
+        total_int_ins_set_inst_power[i] * p_cores[i]->sys.scaling_coefficients[FP_INT];
+    p_cores[i]->sys.core[0].fp_instructions =
+        tot_fp_ins_set_inst_power[i] * p_cores[i]->sys.scaling_coefficients[FP_INT];
+    p_cores[i]->sys.core[0].load_instructions = load_inst;
+    p_cores[i]->sys.core[0].store_instructions = store_inst;
+    p_cores[i]->sys.core[0].committed_instructions = tot_commited_ins_set_inst_power[i];
+//    fprintf(file,"%lf ",p_cores[i]->sys.core[0].total_cycles);
+  }
+  fclose(file);
   p->sys.core[0].total_instructions =
       tot_inst * p->sys.scaling_coefficients[TOT_INST];
   p->sys.core[0].int_instructions =
@@ -255,16 +312,51 @@ void gpgpu_sim_wrapper::set_inst_power(bool clk_gated_lanes, double tot_cycles,
   p->sys.core[0].committed_instructions = committed_inst;
   sample_perf_counters[FP_INT] = int_inst + fp_inst;
   sample_perf_counters[TOT_INST] = tot_inst;
+  printf("\nset_inst_power");
+  for(int i=0;i<number_shaders;i++){
+  printf("\n%d %lf %lf %lf %lf %lf %lf %lf %lf",p_cores[i]->sys.core[0].gpgpu_clock_gated_lanes,p_cores[i]->sys.core[0].total_cycles\
+ , p_cores[i]->sys.core[0].busy_cycles, p_cores[i]->sys.core[0].total_instructions, p_cores[i]->sys.core[0].int_instructions\
+ ,p_cores[i]->sys.core[0].fp_instructions, p_cores[i]->sys.core[0].load_instructions\
+ ,p_cores[i]->sys.core[0].store_instructions,p_cores[i]->sys.core[0].committed_instructions);
+  }
+  printf("\n%d %lf %lf %lf %lf %lf %lf %lf %lf",p->sys.core[0].gpgpu_clock_gated_lanes,p->sys.core[0].total_cycles\
+         , p->sys.core[0].busy_cycles, p->sys.core[0].total_instructions, p->sys.core[0].int_instructions\
+         ,p->sys.core[0].fp_instructions, p->sys.core[0].load_instructions\
+         ,p->sys.core[0].store_instructions,p->sys.core[0].committed_instructions);
 }
 
 void gpgpu_sim_wrapper::set_regfile_power(double reads, double writes,
-                                          double ops) {
+                                          double ops,double *reads_regfile_power,double *write_regfile_power,double *ops_regfile_power) {
   p->sys.core[0].int_regfile_reads =
       reads * p->sys.scaling_coefficients[REG_RD];
   p->sys.core[0].int_regfile_writes =
       writes * p->sys.scaling_coefficients[REG_WR];
   p->sys.core[0].non_rf_operands =
       ops * p->sys.scaling_coefficients[NON_REG_OPs];
+
+ // printf("\n p->sys.core[0].clock_rate: %d", p->sys.core[0].clock_rate);
+
+
+  //  Per core data
+  for(int i=0;i<number_shaders;i++)
+  {
+   // printf("\n p_cores[i]->sys.core[0].clock_rate: %d", p_cores[i]->sys.core[0].clock_rate);
+    p_cores[i]->sys.core[0].int_regfile_reads =
+        reads_regfile_power[i] * p_cores[i]->sys.scaling_coefficients[REG_RD];
+    p_cores[i]->sys.core[0].int_regfile_writes =
+        write_regfile_power[i] * p_cores[i]->sys.scaling_coefficients[REG_WR];
+    p_cores[i]->sys.core[0].non_rf_operands =
+        ops_regfile_power[i] * p_cores[i]->sys.scaling_coefficients[NON_REG_OPs];
+  }
+
+    printf("\nset_regfile_power");
+  for(int i=0;i<number_shaders;i++){
+    printf("\n%lf %lf %lf %lf %lf %lf  ", reads_regfile_power[i],write_regfile_power[i],ops_regfile_power[i],p_cores[i]->sys.core[0].int_regfile_reads,\
+           p_cores[i]->sys.core[0].int_regfile_writes,p_cores[i]->sys.core[0].non_rf_operands);
+  }
+  printf("\n%lf %lf %lf %lf %lf %lf ",reads,writes,ops,p->sys.core[0].int_regfile_reads,p->sys.core[0].int_regfile_writes,p->sys.core[0].non_rf_operands);
+
+
   sample_perf_counters[REG_RD] = reads;
   sample_perf_counters[REG_WR] = writes;
   sample_perf_counters[NON_REG_OPs] = ops;
@@ -276,6 +368,14 @@ void gpgpu_sim_wrapper::set_icache_power(double hits, double misses) {
       misses * p->sys.scaling_coefficients[IC_M];
   p->sys.core[0].icache.read_misses =
       misses * p->sys.scaling_coefficients[IC_M];
+
+  for(int i=0;i<number_shaders;i++){
+    p_cores[i]->sys.core[0].icache.read_accesses =
+        hits * p_cores[i]->sys.scaling_coefficients[IC_H] +
+        misses * p_cores[i]->sys.scaling_coefficients[IC_M];
+    p_cores[i]->sys.core[0].icache.read_misses =
+        misses * p_cores[i]->sys.scaling_coefficients[IC_M];
+  }
   sample_perf_counters[IC_H] = hits;
   sample_perf_counters[IC_M] = misses;
 }
@@ -286,6 +386,14 @@ void gpgpu_sim_wrapper::set_ccache_power(double hits, double misses) {
       misses * p->sys.scaling_coefficients[CC_M];
   p->sys.core[0].ccache.read_misses =
       misses * p->sys.scaling_coefficients[CC_M];
+
+  for(int i=0;i<number_shaders;i++) {
+    p_cores[i]->sys.core[0].ccache.read_accesses =
+        hits *p_cores[i]->sys.scaling_coefficients[CC_H] +
+        misses *  p_cores[i]->sys.scaling_coefficients[CC_M];
+    p_cores[i]->sys.core[0].ccache.read_misses =
+        misses * p_cores[i]->sys.scaling_coefficients[CC_M];
+  }
   sample_perf_counters[CC_H] = hits;
   sample_perf_counters[CC_M] = misses;
   // TODO: coalescing logic is counted as part of the caches power (this is not
@@ -298,15 +406,35 @@ void gpgpu_sim_wrapper::set_tcache_power(double hits, double misses) {
       misses * p->sys.scaling_coefficients[TC_M];
   p->sys.core[0].tcache.read_misses =
       misses * p->sys.scaling_coefficients[TC_M];
+
+  for(int i=0;i<number_shaders;i++) {
+    p_cores[i]->sys.core[0].tcache.read_accesses =
+        hits * p_cores[i]->sys.scaling_coefficients[TC_H] +
+        misses * p_cores[i]->sys.scaling_coefficients[TC_M];
+    p_cores[i]->sys.core[0].tcache.read_misses =
+        misses * p_cores[i]->sys.scaling_coefficients[TC_M];
+  }
+
   sample_perf_counters[TC_H] = hits;
   sample_perf_counters[TC_M] = misses;
   // TODO: coalescing logic is counted as part of the caches power (this is not
   // valid for no-caches architectures)
 }
 
-void gpgpu_sim_wrapper::set_shrd_mem_power(double accesses) {
+void gpgpu_sim_wrapper::set_shrd_mem_power(double accesses,double *shmem_read_set_power) {
   p->sys.core[0].sharedmemory.read_accesses =
       accesses * p->sys.scaling_coefficients[SHRD_ACC];
+
+  for(int i=0;i<number_shaders;i++) {
+    p_cores[i]->sys.core[0].sharedmemory.read_accesses =
+        shmem_read_set_power[i] * p_cores[i]->sys.scaling_coefficients[SHRD_ACC];
+  }
+
+  printf("\nset_shrd_mem_power");
+  for(int i=0;i<number_shaders;i++)
+    printf("\n%lf",p_cores[i]->sys.core[0].sharedmemory.read_accesses);
+  printf("\n%lf",p->sys.core[0].sharedmemory.read_accesses);
+
   sample_perf_counters[SHRD_ACC] = accesses;
 }
 
@@ -323,6 +451,20 @@ void gpgpu_sim_wrapper::set_l1cache_power(double read_hits, double read_misses,
       write_misses * p->sys.scaling_coefficients[DC_WM];
   p->sys.core[0].dcache.write_misses =
       write_misses * p->sys.scaling_coefficients[DC_WM];
+
+  //  Per core data
+  for(int i=0;i<number_shaders;i++) {
+    p_cores[i]->sys.core[0].dcache.read_accesses =
+        read_hits * p_cores[i]->sys.scaling_coefficients[DC_RH] +
+        read_misses * p_cores[i]->sys.scaling_coefficients[DC_RM];
+    p_cores[i]->sys.core[0].dcache.read_misses =
+        read_misses * p_cores[i]->sys.scaling_coefficients[DC_RM];
+    p_cores[i]->sys.core[0].dcache.write_accesses =
+        write_hits * p_cores[i]->sys.scaling_coefficients[DC_WH] +
+        write_misses * p_cores[i]->sys.scaling_coefficients[DC_WM];
+    p_cores[i]->sys.core[0].dcache.write_misses =
+        write_misses * p_cores[i]->sys.scaling_coefficients[DC_WM];
+  }
   sample_perf_counters[DC_RH] = read_hits;
   sample_perf_counters[DC_RM] = read_misses;
   sample_perf_counters[DC_WH] = write_hits;
@@ -346,20 +488,56 @@ void gpgpu_sim_wrapper::set_l2cache_power(double read_hits, double read_misses,
   p->sys.l2.read_misses = read_misses * p->sys.scaling_coefficients[L2_RM];
   p->sys.l2.write_hits = write_hits * p->sys.scaling_coefficients[L2_WH];
   p->sys.l2.write_misses = write_misses * p->sys.scaling_coefficients[L2_WM];
+
+  for(int i=0;i<number_shaders;i++) {
+    p_cores[i]->sys.l2.total_accesses = read_hits * p_cores[i]->sys.scaling_coefficients[L2_RH] +
+                                        read_misses * p_cores[i]->sys.scaling_coefficients[L2_RM] +
+                                        write_hits * p_cores[i]->sys.scaling_coefficients[L2_WH] +
+                                        write_misses * p_cores[i]->sys.scaling_coefficients[L2_WM];
+    p_cores[i]->sys.l2.read_accesses = read_hits * p_cores[i]->sys.scaling_coefficients[L2_RH] +
+                                       read_misses * p_cores[i]->sys.scaling_coefficients[L2_RM];
+    p_cores[i]->sys.l2.write_accesses = write_hits * p_cores[i]->sys.scaling_coefficients[L2_WH] +
+                                        write_misses * p_cores[i]->sys.scaling_coefficients[L2_WM];
+    p_cores[i]->sys.l2.read_hits = read_hits * p_cores[i]->sys.scaling_coefficients[L2_RH];
+    p_cores[i]->sys.l2.read_misses = read_misses * p_cores[i]->sys.scaling_coefficients[L2_RM];
+    p_cores[i]->sys.l2.write_hits = write_hits * p_cores[i]->sys.scaling_coefficients[L2_WH];
+    p_cores[i]->sys.l2.write_misses = write_misses * p_cores[i]->sys.scaling_coefficients[L2_WM];
+  }
+
   sample_perf_counters[L2_RH] = read_hits;
   sample_perf_counters[L2_RM] = read_misses;
   sample_perf_counters[L2_WH] = write_hits;
   sample_perf_counters[L2_WM] = write_misses;
 }
 
-void gpgpu_sim_wrapper::set_idle_core_power(double num_idle_core) {
+void gpgpu_sim_wrapper::set_idle_core_power(double num_idle_core,float* idle_per_cluster) {
   p->sys.num_idle_cores = num_idle_core;
+FILE *file;
+file = fopen("/home/pouria/Desktop/G_GPU/original_freq_per_sm/src/gpgpu-sim/idlecore.txt","a");
+fprintf(file,"\nnum idle core %lf\n",num_idle_core);
+  //  Per core data
+  for(int i=0;i<number_shaders;i++) {
+    p_cores[i]->sys.num_idle_cores = idle_per_cluster[i];
+    fprintf(file,"%f ",  p_cores[i]->sys.num_idle_cores);
+  }
+  fclose(file);
+  printf("\nset_idle_core_power");
+  for(int i=0;i<number_shaders;i++)
+    printf("\n%lf %f",p_cores[i]->sys.num_idle_cores,idle_per_cluster[i]);
+  printf("\n%lf",p->sys.num_idle_cores);
+
   sample_perf_counters[IDLE_CORE_N] = num_idle_core;
 }
 
 void gpgpu_sim_wrapper::set_duty_cycle_power(double duty_cycle) {
   p->sys.core[0].pipeline_duty_cycle =
       duty_cycle * p->sys.scaling_coefficients[PIPE_A];
+
+  //  Per core data
+  for(int i=0;i<number_shaders;i++) {
+    p_cores[i]->sys.core[0].pipeline_duty_cycle =
+        duty_cycle * p_cores[i]->sys.scaling_coefficients[PIPE_A];
+  }
   sample_perf_counters[PIPE_A] = duty_cycle;
 }
 
@@ -370,6 +548,15 @@ void gpgpu_sim_wrapper::set_mem_ctrl_power(double reads, double writes,
   p->sys.mc.memory_reads = reads * p->sys.scaling_coefficients[MEM_RD];
   p->sys.mc.memory_writes = writes * p->sys.scaling_coefficients[MEM_WR];
   p->sys.mc.dram_pre = dram_precharge * p->sys.scaling_coefficients[MEM_PRE];
+
+  for(int i=0;i<number_shaders;i++) {
+    p_cores[i]->sys.mc.memory_accesses = reads * p_cores[i]->sys.scaling_coefficients[MEM_RD] +
+                                         writes * p_cores[i]->sys.scaling_coefficients[MEM_WR];
+    p_cores[i]->sys.mc.memory_reads = reads * p_cores[i]->sys.scaling_coefficients[MEM_RD];
+    p_cores[i]->sys.mc.memory_writes = writes * p_cores[i]->sys.scaling_coefficients[MEM_WR];
+    p_cores[i]->sys.mc.dram_pre = dram_precharge * p_cores[i]->sys.scaling_coefficients[MEM_PRE];
+  }
+
   sample_perf_counters[MEM_RD] = reads;
   sample_perf_counters[MEM_WR] = writes;
   sample_perf_counters[MEM_PRE] = dram_precharge;
@@ -377,7 +564,7 @@ void gpgpu_sim_wrapper::set_mem_ctrl_power(double reads, double writes,
 
 void gpgpu_sim_wrapper::set_exec_unit_power(double fpu_accesses,
                                             double ialu_accesses,
-                                            double sfu_accesses) {
+                                            double sfu_accesses,double *fpu_accesses_per_cluster,double *ialu_accesses_per_cluster,double *sfu_accesses_per_cluster) {
   p->sys.core[0].fpu_accesses =
       fpu_accesses * p->sys.scaling_coefficients[FPU_ACC];
   // Integer ALU (not present in Tesla)
@@ -387,15 +574,34 @@ void gpgpu_sim_wrapper::set_exec_unit_power(double fpu_accesses,
   p->sys.core[0].mul_accesses =
       sfu_accesses * p->sys.scaling_coefficients[SFU_ACC];
 
+  for(int i=0;i<number_shaders;i++)
+  {
+    p_cores[i]->sys.core[0].fpu_accesses =
+        fpu_accesses_per_cluster[i] * p_cores[i]->sys.scaling_coefficients[FPU_ACC];
+    // Integer ALU (not present in Tesla)
+    p_cores[i]->sys.core[0].ialu_accesses =
+        ialu_accesses_per_cluster[i] * p_cores[i]->sys.scaling_coefficients[SP_ACC];
+    // Sfu accesses
+    p_cores[i]->sys.core[0].mul_accesses =
+        sfu_accesses_per_cluster[i] * p_cores[i]->sys.scaling_coefficients[SFU_ACC];
+  }
+
+
   sample_perf_counters[SP_ACC] = ialu_accesses;
   sample_perf_counters[SFU_ACC] = sfu_accesses;
   sample_perf_counters[FPU_ACC] = fpu_accesses;
 }
 
 void gpgpu_sim_wrapper::set_active_lanes_power(double sp_avg_active_lane,
-                                               double sfu_avg_active_lane) {
+                                               double sfu_avg_active_lane,float * sp_avg_active_lane_per_cluster,float * sfu_avg_active_lane_per_cluster,int stat_sample_freq) {
+
   p->sys.core[0].sp_average_active_lanes = sp_avg_active_lane;
   p->sys.core[0].sfu_average_active_lanes = sfu_avg_active_lane;
+
+  for(int i=0;i<number_shaders;i++) {
+    p_cores[i]->sys.core[0].sp_average_active_lanes = sp_avg_active_lane_per_cluster[i];
+    p_cores[i]->sys.core[0].sfu_average_active_lanes = sfu_avg_active_lane_per_cluster[i];
+  }
 }
 
 void gpgpu_sim_wrapper::set_NoC_power(double noc_tot_reads,
@@ -403,6 +609,13 @@ void gpgpu_sim_wrapper::set_NoC_power(double noc_tot_reads,
   p->sys.NoC[0].total_accesses =
       noc_tot_reads * p->sys.scaling_coefficients[NOC_A] +
       noc_tot_writes * p->sys.scaling_coefficients[NOC_A];
+
+  for(int i=0;i<number_shaders;i++) {
+    p_cores[i]->sys.NoC[0].total_accesses =
+        noc_tot_reads *  p_cores[i]->sys.scaling_coefficients[NOC_A] +
+        noc_tot_writes *  p_cores[i]->sys.scaling_coefficients[NOC_A];
+  }
+
   sample_perf_counters[NOC_A] = noc_tot_reads + noc_tot_writes;
 }
 
@@ -413,7 +626,12 @@ void gpgpu_sim_wrapper::power_metrics_calculations() {
   // Current sample power
   double sample_power =
       proc->rt_power.readOp.dynamic + sample_cmp_pwr[CONST_DYNAMICP];
-
+    printf("\nsample_power %lf \t %lf \t %lf",sample_power,proc->rt_power.readOp.dynamic,sample_cmp_pwr[CONST_DYNAMICP]);
+  double power_comm = (sum_pwr_cores-sample_power)/(number_shaders-1);
+  for(int i=0;i<number_shaders;i++){
+    printf("\nIsolated power per core %d %lf",i,power_per_core[i]-power_comm);
+    printf("\nPer core %lf",proc_cores[i]->rt_power.readOp.dynamic);
+  }
   // Average power
   // Previous + new + constant dynamic power (e.g., dynamic clocking power)
   kernel_tot_power += sample_power;
@@ -607,10 +825,282 @@ void gpgpu_sim_wrapper::update_coefficients() {
   }
 }
 
-void gpgpu_sim_wrapper::update_components_power() {
-  update_coefficients();
+void gpgpu_sim_wrapper::update_coefficients_per_core() {
+  for (int i = 0; i < number_shaders; i++) {
+    initpower_coeff[FP_INT] = proc_cores[i]->cores[0]->get_coefficient_fpint_insts();
+    effpower_coeff[FP_INT] =
+        initpower_coeff[FP_INT] * p->sys.scaling_coefficients[FP_INT];
 
+    initpower_coeff[TOT_INST] = proc_cores[i]->cores[0]->get_coefficient_tot_insts();
+    effpower_coeff[TOT_INST] =
+        initpower_coeff[TOT_INST] * p->sys.scaling_coefficients[TOT_INST];
+
+    initpower_coeff[REG_RD] =
+        proc_cores[i]->cores[0]->get_coefficient_regreads_accesses() *
+        (proc_cores[i]->cores[0]->exu->rf_fu_clockRate / proc_cores[i]->cores[0]->exu->clockRate);
+    initpower_coeff[REG_WR] =
+        proc_cores[i]->cores[0]->get_coefficient_regwrites_accesses() *
+        (proc_cores[i]->cores[0]->exu->rf_fu_clockRate / proc_cores[i]->cores[0]->exu->clockRate);
+    initpower_coeff[NON_REG_OPs] =
+        proc_cores[i]->cores[0]->get_coefficient_noregfileops_accesses() *
+        (proc_cores[i]->cores[0]->exu->rf_fu_clockRate / proc_cores[i]->cores[0]->exu->clockRate);
+    effpower_coeff[REG_RD] =
+        initpower_coeff[REG_RD] * p->sys.scaling_coefficients[REG_RD];
+    effpower_coeff[REG_WR] =
+        initpower_coeff[REG_WR] * p->sys.scaling_coefficients[REG_WR];
+    effpower_coeff[NON_REG_OPs] =
+        initpower_coeff[NON_REG_OPs] * p->sys.scaling_coefficients[NON_REG_OPs];
+
+    initpower_coeff[IC_H] = proc_cores[i]->cores[0]->get_coefficient_icache_hits();
+    initpower_coeff[IC_M] = proc_cores[i]->cores[0]->get_coefficient_icache_misses();
+    effpower_coeff[IC_H] =
+        initpower_coeff[IC_H] * p->sys.scaling_coefficients[IC_H];
+    effpower_coeff[IC_M] =
+        initpower_coeff[IC_M] * p->sys.scaling_coefficients[IC_M];
+
+    initpower_coeff[CC_H] = (proc_cores[i]->cores[0]->get_coefficient_ccache_readhits() +
+                             proc_cores[i]->get_coefficient_readcoalescing());
+    initpower_coeff[CC_M] =
+        (proc_cores[i]->cores[0]->get_coefficient_ccache_readmisses() +
+         proc_cores[i]->get_coefficient_readcoalescing());
+    effpower_coeff[CC_H] =
+        initpower_coeff[CC_H] * p->sys.scaling_coefficients[CC_H];
+    effpower_coeff[CC_M] =
+        initpower_coeff[CC_M] * p->sys.scaling_coefficients[CC_M];
+
+    initpower_coeff[TC_H] = (proc_cores[i]->cores[0]->get_coefficient_tcache_readhits() +
+                             proc_cores[i]->get_coefficient_readcoalescing());
+    initpower_coeff[TC_M] =
+        (proc_cores[i]->cores[0]->get_coefficient_tcache_readmisses() +
+         proc_cores[i]->get_coefficient_readcoalescing());
+    effpower_coeff[TC_H] =
+        initpower_coeff[TC_H] * p->sys.scaling_coefficients[TC_H];
+    effpower_coeff[TC_M] =
+        initpower_coeff[TC_M] * p->sys.scaling_coefficients[TC_M];
+
+    initpower_coeff[SHRD_ACC] =
+        proc_cores[i]->cores[0]->get_coefficient_sharedmemory_readhits();
+    effpower_coeff[SHRD_ACC] =
+        initpower_coeff[SHRD_ACC] * p->sys.scaling_coefficients[SHRD_ACC];
+
+    initpower_coeff[DC_RH] =
+        (proc_cores[i]->cores[0]->get_coefficient_dcache_readhits() +
+         proc_cores[i]->get_coefficient_readcoalescing());
+    initpower_coeff[DC_RM] =
+        (proc_cores[i]->cores[0]->get_coefficient_dcache_readmisses() +
+         proc_cores[i]->get_coefficient_readcoalescing());
+    initpower_coeff[DC_WH] =
+        (proc_cores[i]->cores[0]->get_coefficient_dcache_writehits() +
+         proc_cores[i]->get_coefficient_writecoalescing());
+    initpower_coeff[DC_WM] =
+        (proc_cores[i]->cores[0]->get_coefficient_dcache_writemisses() +
+         proc_cores[i]->get_coefficient_writecoalescing());
+    effpower_coeff[DC_RH] =
+        initpower_coeff[DC_RH] * p->sys.scaling_coefficients[DC_RH];
+    effpower_coeff[DC_RM] =
+        initpower_coeff[DC_RM] * p->sys.scaling_coefficients[DC_RM];
+    effpower_coeff[DC_WH] =
+        initpower_coeff[DC_WH] * p->sys.scaling_coefficients[DC_WH];
+    effpower_coeff[DC_WM] =
+        initpower_coeff[DC_WM] * p->sys.scaling_coefficients[DC_WM];
+
+    initpower_coeff[L2_RH] = proc_cores[i]->get_coefficient_l2_read_hits();
+    initpower_coeff[L2_RM] = proc_cores[i]->get_coefficient_l2_read_misses();
+    initpower_coeff[L2_WH] = proc_cores[i]->get_coefficient_l2_write_hits();
+    initpower_coeff[L2_WM] = proc_cores[i]->get_coefficient_l2_write_misses();
+    effpower_coeff[L2_RH] =
+        initpower_coeff[L2_RH] * p->sys.scaling_coefficients[L2_RH];
+    effpower_coeff[L2_RM] =
+        initpower_coeff[L2_RM] * p->sys.scaling_coefficients[L2_RM];
+    effpower_coeff[L2_WH] =
+        initpower_coeff[L2_WH] * p->sys.scaling_coefficients[L2_WH];
+    effpower_coeff[L2_WM] =
+        initpower_coeff[L2_WM] * p->sys.scaling_coefficients[L2_WM];
+
+    initpower_coeff[IDLE_CORE_N] =
+        p->sys.idle_core_power * proc_cores[i]->cores[0]->executionTime;
+    effpower_coeff[IDLE_CORE_N] =
+        initpower_coeff[IDLE_CORE_N] * p->sys.scaling_coefficients[IDLE_CORE_N];
+
+    initpower_coeff[PIPE_A] = proc_cores[i]->cores[0]->get_coefficient_duty_cycle();
+    effpower_coeff[PIPE_A] =
+        initpower_coeff[PIPE_A] * p->sys.scaling_coefficients[PIPE_A];
+
+    initpower_coeff[MEM_RD] = proc_cores[i]->get_coefficient_mem_reads();
+    initpower_coeff[MEM_WR] = proc_cores[i]->get_coefficient_mem_writes();
+    initpower_coeff[MEM_PRE] = proc_cores[i]->get_coefficient_mem_pre();
+    effpower_coeff[MEM_RD] =
+        initpower_coeff[MEM_RD] * p->sys.scaling_coefficients[MEM_RD];
+    effpower_coeff[MEM_WR] =
+        initpower_coeff[MEM_WR] * p->sys.scaling_coefficients[MEM_WR];
+    effpower_coeff[MEM_PRE] =
+        initpower_coeff[MEM_PRE] * p->sys.scaling_coefficients[MEM_PRE];
+
+    initpower_coeff[SP_ACC] =
+        proc_cores[i]->cores[0]->get_coefficient_ialu_accesses() *
+        (proc_cores[i]->cores[0]->exu->rf_fu_clockRate / proc_cores[i]->cores[0]->exu->clockRate);
+    ;
+    initpower_coeff[SFU_ACC] = proc_cores[i]->cores[0]->get_coefficient_sfu_accesses();
+    initpower_coeff[FPU_ACC] = proc_cores[i]->cores[0]->get_coefficient_fpu_accesses();
+
+    effpower_coeff[SP_ACC] =
+        initpower_coeff[SP_ACC] * p->sys.scaling_coefficients[SP_ACC];
+    effpower_coeff[SFU_ACC] =
+        initpower_coeff[SFU_ACC] * p->sys.scaling_coefficients[SFU_ACC];
+    effpower_coeff[FPU_ACC] =
+        initpower_coeff[FPU_ACC] * p->sys.scaling_coefficients[FPU_ACC];
+
+    initpower_coeff[NOC_A] = proc_cores[i]->get_coefficient_noc_accesses();
+    effpower_coeff[NOC_A] =
+        initpower_coeff[NOC_A] * p->sys.scaling_coefficients[NOC_A];
+
+    const_dynamic_power =
+        proc_cores[i]->get_const_dynamic_power() / (proc_cores[i]->cores[0]->executionTime);
+
+    for (unsigned i = 0; i < num_perf_counters; i++) {
+      initpower_coeff[i] /= (proc_cores[i]->cores[0]->executionTime);
+      effpower_coeff[i] /= (proc_cores[i]->cores[0]->executionTime);
+    }
+  }
+}
+
+void gpgpu_sim_wrapper::smp_cpm_pwr_print(){
+  for(int i=0;i<num_pwr_cmps;i++){
+    printf("\nTotal component %d: %lf",i,sample_cmp_pwr[i]);
+    for(int j=0;j<number_shaders;j++){
+      printf("\ncore %d component %d: %lf",j,i,sample_cmp_pwr_per_core[j][i]);
+    }
+  }
+
+}
+void gpgpu_sim_wrapper::update_components_power_per_core(bool loop) {
+//  update_coefficients_per_core();
+sum_pwr_cores = 0;
+  for (int i = 0; i < number_shaders; i++) {
+    sample_cmp_pwr_per_core[i][IBP] =
+        (proc_cores[i]->cores[0]->ifu->IB->rt_power.readOp.dynamic +
+         proc_cores[i]->cores[0]->ifu->IB->rt_power.writeOp.dynamic +
+         proc_cores[i]->cores[0]->ifu->ID_misc->rt_power.readOp.dynamic +
+         proc_cores[i]->cores[0]->ifu->ID_operand->rt_power.readOp.dynamic +
+         proc_cores[i]->cores[0]->ifu->ID_inst->rt_power.readOp.dynamic) /
+        (proc_cores[i]->cores[0]->executionTime);
+
+    sample_cmp_pwr_per_core[i][ICP] =
+        proc_cores[i]->cores[0]->ifu->icache.rt_power.readOp.dynamic /
+        (proc_cores[i]->cores[0]->executionTime);
+
+    sample_cmp_pwr_per_core[i][ICP] =
+        proc_cores[i]->cores[0]->ifu->icache.rt_power.readOp.dynamic /
+        (proc_cores[i]->cores[0]->executionTime);
+
+    sample_cmp_pwr_per_core[i][DCP] =
+        proc_cores[i]->cores[0]->lsu->dcache.rt_power.readOp.dynamic /
+        (proc_cores[i]->cores[0]->executionTime);
+
+    sample_cmp_pwr_per_core[i][TCP] =
+        proc_cores[i]->cores[0]->lsu->tcache.rt_power.readOp.dynamic /
+        (proc_cores[i]->cores[0]->executionTime);
+
+    sample_cmp_pwr_per_core[i][CCP] =
+        proc_cores[i]->cores[0]->lsu->ccache.rt_power.readOp.dynamic /
+        (proc_cores[i]->cores[0]->executionTime);
+
+    sample_cmp_pwr_per_core[i][SHRDP] =
+        proc_cores[i]->cores[0]->lsu->sharedmemory.rt_power.readOp.dynamic /
+        (proc_cores[i]->cores[0]->executionTime);
+
+    sample_cmp_pwr_per_core[i][RFP] =
+        (proc_cores[i]->cores[0]->exu->rfu->rt_power.readOp.dynamic /
+         (proc_cores[i]->cores[0]->executionTime)) *
+        (proc_cores[i]->cores[0]->exu->rf_fu_clockRate / proc_cores[i]->cores[0]->exu->clockRate);
+   // printf("\nsample_cmp_pwr_per_core[%d][RFP] =%lf  executionTime: %lf",i,sample_cmp_pwr_per_core[i][RFP],proc_cores[i]->cores[0]->executionTime);
+    sample_cmp_pwr_per_core[i][SPP] =
+        (proc_cores[i]->cores[0]->exu->exeu->rt_power.readOp.dynamic /
+         (proc_cores[i]->cores[0]->executionTime)) *
+        (proc_cores[i]->cores[0]->exu->rf_fu_clockRate / proc_cores[i]->cores[0]->exu->clockRate);
+
+    sample_cmp_pwr_per_core[i][SFUP] =
+        (proc_cores[i]->cores[0]->exu->mul->rt_power.readOp.dynamic /
+         (proc_cores[i]->cores[0]->executionTime));
+
+    sample_cmp_pwr_per_core[i][FPUP] =
+        (proc_cores[i]->cores[0]->exu->fp_u->rt_power.readOp.dynamic /
+         (proc_cores[i]->cores[0]->executionTime));
+
+    FILE* file;
+    file = fopen("/home/pouria/Desktop/G_GPU/original_freq_per_sm/src/gpgpu-sim/output_time.txt","a");
+    if(!loop)
+    fprintf(file,"\nFirst round");
+    fprintf(file,"\n%d: %lf",i,proc_cores[i]->cores[0]->executionTime);
+    fclose(file);
+printf("\nproc_cores[i]->cores[0]->executionTime:%lf",proc_cores[i]->cores[0]->executionTime);
+    sample_cmp_pwr_per_core[i][SCHEDP] =
+        proc_cores[i]->cores[0]->exu->scheu->rt_power.readOp.dynamic /
+        (proc_cores[i]->cores[0]->executionTime);
+
+    sample_cmp_pwr_per_core[i][L2CP] =
+        (proc_cores[i]->XML->sys.number_of_L2s > 0)
+            ? proc_cores[i]->l2array[0]->rt_power.readOp.dynamic /
+                  (proc_cores[i]->cores[0]->executionTime)
+            : 0;
+
+    sample_cmp_pwr_per_core[i][MCP] =
+        (proc_cores[i]->mc->rt_power.readOp.dynamic -
+         proc_cores[i]->mc->dram->rt_power.readOp.dynamic) /
+        (proc_cores[i]->cores[0]->executionTime);
+
+    sample_cmp_pwr_per_core[i][NOCP] = proc_cores[i]->nocs[0]->rt_power.readOp.dynamic /
+                                       (proc_cores[i]->cores[0]->executionTime);
+
+    sample_cmp_pwr_per_core[i][DRAMP] =
+        proc_cores[i]->mc->dram->rt_power.readOp.dynamic /
+        (proc_cores[i]->cores[0]->executionTime);
+
+    sample_cmp_pwr_per_core[i][PIPEP] =
+        proc_cores[i]->cores[0]->Pipeline_energy / (proc_cores[i]->cores[0]->executionTime);
+
+    sample_cmp_pwr_per_core[i][IDLE_COREP] =
+        proc_cores[i]->cores[0]->IdleCoreEnergy / (proc_cores[i]->cores[0]->executionTime);
+
+    // This constant dynamic power (e.g., clock power) part is estimated via
+    // regression model.
+    sample_cmp_pwr_per_core[i][CONST_DYNAMICP] = 0;
+    double cnst_dyn =
+        proc_cores[i]->get_const_dynamic_power() / (proc_cores[i]->cores[0]->executionTime);
+    // If the regression scaling term is greater than the recorded constant
+    // dynamic power then use the difference (other portion already added to
+    // dynamic power). Else, all the constant dynamic power is accounted for, add nothing.
+    if (p_cores[i]->sys.scaling_coefficients[CONST_DYNAMICN] > cnst_dyn)
+      sample_cmp_pwr_per_core[i][CONST_DYNAMICP] =
+          (p_cores[i]->sys.scaling_coefficients[CONST_DYNAMICN] - cnst_dyn);
+
+    double sum_pwr_cmp = 0;
+    for (unsigned j = 0; j < num_pwr_cmps; j++) {
+      sum_pwr_cmp += sample_cmp_pwr_per_core[i][j];
+    }
+        printf("\nsum_pwr_cmp per core %lf", sum_pwr_cmp);
+      sum_pwr_cores += sum_pwr_cmp;
+      power_per_core[i] = sum_pwr_cmp;
+
+      file = fopen("/home/pouria/Desktop/G_GPU/original_freq_per_sm/src/gpgpu-sim/Final_power.txt","a");
+
+      if(i==0 && !loop)
+        fprintf(file,"\nFirst round\n%lf ",power_per_core[i]);
+      if(i != 0)
+        fprintf(file,"%lf ",power_per_core[i]);
+      else
+        fprintf(file,"\n%lf ",power_per_core[i]);
+      fclose(file);
+  }
+
+ // printf("\nall core %lf", sum_pwr_cores);
+
+}
+void gpgpu_sim_wrapper::update_components_power(int x) {
+  if(x)
+  update_coefficients();
   proc_power = proc->rt_power.readOp.dynamic;
+  //printf("\ncores in poorc->cores: %d\n",(int)(sizeof(proc->cores)/sizeof(proc->cores[0])));
 
   sample_cmp_pwr[IBP] =
       (proc->cores[0]->ifu->IB->rt_power.readOp.dynamic +
@@ -619,6 +1109,12 @@ void gpgpu_sim_wrapper::update_components_power() {
        proc->cores[0]->ifu->ID_operand->rt_power.readOp.dynamic +
        proc->cores[0]->ifu->ID_inst->rt_power.readOp.dynamic) /
       (proc->cores[0]->executionTime);
+
+
+
+
+  sample_cmp_pwr[ICP] = proc->cores[0]->ifu->icache.rt_power.readOp.dynamic /
+                        (proc->cores[0]->executionTime);
 
   sample_cmp_pwr[ICP] = proc->cores[0]->ifu->icache.rt_power.readOp.dynamic /
                         (proc->cores[0]->executionTime);
@@ -645,7 +1141,7 @@ void gpgpu_sim_wrapper::update_components_power() {
       (proc->cores[0]->exu->exeu->rt_power.readOp.dynamic /
        (proc->cores[0]->executionTime)) *
       (proc->cores[0]->exu->rf_fu_clockRate / proc->cores[0]->exu->clockRate);
-
+//"\ne`xe clock rate i`s %lf clockrate is %d %d",proc->cores[0]->exu->clockRate,p->sys.core[0].clock_rate,p_cores[0]->sys.core[0].clock_rate);
   sample_cmp_pwr[SFUP] = (proc->cores[0]->exu->mul->rt_power.readOp.dynamic /
                           (proc->cores[0]->executionTime));
 
@@ -667,6 +1163,8 @@ void gpgpu_sim_wrapper::update_components_power() {
   sample_cmp_pwr[NOCP] =
       proc->nocs[0]->rt_power.readOp.dynamic / (proc->cores[0]->executionTime);
 
+
+printf("\nproc->cores[0]->executionTime:%lf",proc->cores[0]->executionTime);
   sample_cmp_pwr[DRAMP] =
       proc->mc->dram->rt_power.readOp.dynamic / (proc->cores[0]->executionTime);
 
@@ -695,12 +1193,26 @@ void gpgpu_sim_wrapper::update_components_power() {
   for (unsigned i = 0; i < num_pwr_cmps; i++) {
     sum_pwr_cmp += sample_cmp_pwr[i];
   }
+
+  FILE* file;
+  file = fopen("/home/pouria/Desktop/G_GPU/original_freq_per_sm/src/gpgpu-sim/Final_power_total.txt","a");
+  fprintf(file,"\n%d sum_pwr_cmp %lf proc_power %lf",x,sum_pwr_cmp,proc_power);
+  fclose(file);
   bool check = false;
+    printf("\nsum_pwr_cmp %lf proc_power %lf",sum_pwr_cmp,proc_power);
   check = sanity_check(sum_pwr_cmp, proc_power);
-  assert("Total Power does not equal the sum of the components\n" && (check));
+//  assert("Total Power does not equal the sum of the components\n" && (check));
 }
 
-void gpgpu_sim_wrapper::compute() { proc->compute(); }
+void gpgpu_sim_wrapper::compute(bool loop) {
+  for(int i=0;i<number_shaders;i++){
+    printf("\nCore %d",i);
+    proc_cores[i]->compute(loop);
+  }
+
+
+  proc->compute(loop);
+}
 void gpgpu_sim_wrapper::print_power_kernel_stats(
     double gpu_sim_cycle, double gpu_tot_sim_cycle, double init_value,
     const std::string& kernel_info_string, bool print_trace) {
@@ -860,4 +1372,10 @@ void gpgpu_sim_wrapper::close_files() {
       gzclose(metric_trace_file);
     }
   }
+}
+
+
+double gpgpu_sim_wrapper::per_core_power_calculation(double* Cluster_freq) {
+
+
 }

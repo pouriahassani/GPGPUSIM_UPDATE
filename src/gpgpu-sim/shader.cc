@@ -4106,6 +4106,7 @@ void opndcoll_rfu_t::collector_unit_t::dispatch() {
 
 void exec_simt_core_cluster::create_shader_core_ctx() {
   m_core = new shader_core_ctx *[m_config->n_simt_cores_per_cluster];
+  printf("\n****n_simt_cores_per_cluster %d***",m_config->n_simt_cores_per_cluster);
   for (unsigned i = 0; i < m_config->n_simt_cores_per_cluster; i++) {
     unsigned sid = m_config->cid_to_sid(i, m_cluster_id);
     m_core[i] = new exec_shader_core_ctx(m_gpu, this, sid, m_cluster_id,
@@ -4130,11 +4131,13 @@ simt_core_cluster::simt_core_cluster(class gpgpu_sim *gpu, unsigned cluster_id,
 }
 
 void simt_core_cluster::core_cycle() {
+int i=0;
   for (std::list<unsigned>::iterator it = m_core_sim_order.begin();
        it != m_core_sim_order.end(); ++it) {
+      i+=1;
     m_core[*it]->cycle();
   }
-
+//printf("\n***number of shaders per cluster: %d\n",i);
   if (m_config->simt_core_sim_order == 1) {
     m_core_sim_order.splice(m_core_sim_order.end(), m_core_sim_order,
                             m_core_sim_order.begin());
