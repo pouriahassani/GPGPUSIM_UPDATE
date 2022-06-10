@@ -109,6 +109,32 @@ class Processor : public Component {
         (cores[0]->exu->fp_u->base_energy / cores[0]->exu->fp_u->clockRate);
     return constpart;
   }
+  double get_const_dynamic_power_per_sm() {
+    double constpart = 0;
+    constpart +=
+        (cores[0]->exu->exeu->base_energy / cores[0]->exu->exeu->clockRate) *
+        (cores[0]->exu->rf_fu_clockRate / cores[0]->exu->clockRate);
+    constpart +=
+        (cores[0]->exu->mul->base_energy / cores[0]->exu->mul->clockRate);
+    constpart +=
+        (cores[0]->exu->fp_u->base_energy / cores[0]->exu->fp_u->clockRate);
+    return constpart;
+  }
+
+  double get_const_dynamic_power_mem_only() {
+    double constpart = 0;
+    constpart += (mc->frontend->power.readOp.dynamic * 0.1 *
+                  mc->frontend->mcp.clockRate * mc->frontend->mcp.num_mcs *
+                  mc->frontend->mcp.executionTime);
+    constpart +=
+        (mc->transecEngine->power.readOp.dynamic * 0.1 *
+         mc->transecEngine->mcp.clockRate * mc->transecEngine->mcp.num_mcs *
+         mc->transecEngine->mcp.executionTime);
+    constpart += (mc->PHY->power.readOp.dynamic * 0.1 * mc->PHY->mcp.clockRate *
+                  mc->PHY->mcp.num_mcs * mc->PHY->mcp.executionTime);
+    return constpart;
+  }
+
 #define COALESCE_SCALE 1
   double get_coefficient_readcoalescing() {
     double value = 0;

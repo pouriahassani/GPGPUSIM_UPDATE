@@ -823,9 +823,12 @@ gpgpu_sim::gpgpu_sim(const gpgpu_sim_config &config, gpgpu_context *ctx)
   m_memory_config = &m_config.m_memory_config;
   cluster_time = (double*)malloc(sizeof(double)*m_shader_config->n_simt_clusters);
   cluster_all = (bool*)malloc(sizeof(bool)*m_shader_config->n_simt_clusters);
+  new_cluster_freq = (double*)malloc(sizeof(double)*m_shader_config->n_simt_clusters);
+  freq_change = false;
+  sample_count = 0;
   ctx->ptx_parser->set_ptx_warp_size(m_shader_config);
   ptx_file_line_stats_create_exposed_latency_tracker(m_config.num_shader());
-
+  Total_exe_time = 0;
 #ifdef GPGPUSIM_POWER_MODEL
   m_gpgpusim_wrapper = new gpgpu_sim_wrapper(config.g_power_simulation_enabled,
                                              config.g_power_config_name,m_config.num_shader(),m_config.cluster_freq);
@@ -837,6 +840,7 @@ gpgpu_sim::gpgpu_sim(const gpgpu_sim_config &config, gpgpu_context *ctx)
   average_pipeline_duty_cycle = (float *)malloc(sizeof(float));
   active_sms = (float *)malloc(sizeof(float));
   numb_active_sms = (float*)malloc(sizeof(float)*m_shader_config->n_simt_clusters);
+  average_pipeline_duty_cycle_per_sm = (float *)malloc(sizeof(float)*m_shader_config->n_simt_clusters);
   for (int i=0;i<m_shader_config->n_simt_clusters;i++)
     numb_active_sms[i] =0;
   m_power_stats =
@@ -890,6 +894,8 @@ gpgpu_sim::gpgpu_sim(const gpgpu_sim_config &config, gpgpu_context *ctx)
   m_last_cluster_issue = m_shader_config->n_simt_clusters -
                          1;  // this causes first launch to use simt cluster 0
   *average_pipeline_duty_cycle = 0;
+  for(int i=0;i<m_shader_config->n_simt_clusters;i++)
+    average_pipeline_duty_cycle_per_sm[i] = 0;
   *active_sms = 0;
 
   last_liveness_message_time = 0;
@@ -955,7 +961,7 @@ void gpgpu_sim_config::init_clock_domains(void) {
 	{
 		printf("\n freq = %d",i);
 		 //scanf("%lf", &cluster_freq[i]);
-		  cluster_freq[i] = 700*(1<<20);
+		  cluster_freq[i] = 700*1e6;
 		  cluster_period[i] = 1/ cluster_freq[i];
     printf("\n cluster period: %.20lf, cluster_freq: %.20lf",cluster_period[i],cluster_freq[i]);
 	}
@@ -963,7 +969,7 @@ void gpgpu_sim_config::init_clock_domains(void) {
 	{
 		printf("\n freq = %d",i);
 		 //scanf("%lf", &cluster_freq[i]);
-		  cluster_freq[i] = 700*(1<<20);
+		  cluster_freq[i] = 700*1e6;
 		  cluster_period[i] = 1/ cluster_freq[i];
     printf("\n cluster period: %.20lf, cluster_freq: %.20lf",cluster_period[i],cluster_freq[i]);
 	}
@@ -975,6 +981,11 @@ void gpgpu_sim_config::init_clock_domains(void) {
   icnt_period = 1 / icnt_freq;
   dram_period = 1 / dram_freq;
   l2_period = 1 / l2_freq;
+  FILE *file_freq;
+  file_freq = fopen("/home/pouria/Desktop/G_GPU/DATA/freqs.txt","a");
+  fprintf(file_freq,"GPGPU-Sim uArch: clock freqs: %lf:%lf:%lf:%lf\n", core_freq,
+                icnt_freq, l2_freq, dram_freq);
+  fclose(file_freq);
   printf("GPGPU-Sim uArch: clock freqs: %lf:%lf:%lf:%lf\n", core_freq,
          icnt_freq, l2_freq, dram_freq);
   printf("GPGPU-Sim uArch: clock periods: %.20lf:%.20lf:%.20lf:%.20lf\n",
@@ -1726,11 +1737,14 @@ void dram_t::dram_log(int task) {
 
 // Find next clock domain and increment its time
 int gpgpu_sim::next_clock_domain(void) {
-  
+  FILE *file;
+  file = fopen("/home/pouria/Desktop/G_GPU/DATA/mask.txt","a");
+
   double smallest = icnt_time < dram_time ? icnt_time: dram_time;
   long int mask = 0x00;
   for(unsigned i=0;i<m_shader_config->n_simt_clusters;i++)
   {
+
 	  smallest = smallest<cluster_time[i] ? smallest : cluster_time[i];
   }
   if (l2_time <= smallest) {
@@ -1755,19 +1769,29 @@ int gpgpu_sim::next_clock_domain(void) {
 
 	}
   }
-// printf("\n mask : %d",mask);
+
+  fclose(file);
   return mask;
 }
 
-void gpgpu_sim::issue_block2core(int i) {
+void gpgpu_sim::issue_block2core(int Clock_mask) {
   unsigned last_issued = m_last_cluster_issue;
-    unsigned idx = (i + last_issued + 1) % m_shader_config->n_simt_clusters;
-    unsigned num = m_cluster[idx]->issue_block2core();
-    if (num) {
-      m_last_cluster_issue = idx;
-      m_total_cta_launched += num;
+  for(unsigned i=0;i<m_shader_config->n_simt_clusters;i++)
+  {
+    if (Clock_mask & (CORE<<i)) {
+      unsigned idx = (i + last_issued + 1) % m_shader_config->n_simt_clusters;
+      unsigned num = m_cluster[idx]->issue_block2core();
+      FILE *file =
+          fopen("/home/pouria/Desktop/G_GPU/DATA/in_block_to_core.txt", "a");
+      fprintf(file, "\n%d %d last_issued: %u m_last_cluster_issue:%u idx: %u",
+              i, num, last_issued, m_last_cluster_issue, idx);
+      fclose(file);
+      if (num) {
+        m_last_cluster_issue = idx;
+        m_total_cta_launched += num;
+      }
     }
-  
+  }
 }
 
 unsigned long long g_single_step =
@@ -1862,39 +1886,66 @@ void gpgpu_sim::cycle() {
 
 // for(unsigned i=0;i<m_shader_config->n_simt_clusters;i++)
 //  {
-	  if (clock_mask & (CORE))
+//	  if (clock_mask & (CORE))
     // L1 cache + shader core pipeline stages
 
-    m_power_stats->pwr_mem_stat->core_cache_stats[CURRENT_STAT_IDX].clear();
+
+          FILE *filee;
+          filee = fopen("/home/pouria/Desktop/G_GPU/DATA/cluster_turn.txt","a");
+          fprintf(filee,"\n\n");
+
+
  for(unsigned i=0;i<m_shader_config->n_simt_clusters;i++)
   {
+
 	  if (clock_mask & (CORE<<i)){
-		  if (m_cluster[i]->get_not_completed() || get_more_cta_left()) {
-			m_cluster[i]->core_cycle();
-			*active_sms += m_cluster[i]->get_n_active_sms();
-                        numb_active_sms[i]+= m_cluster[i]->get_n_active_sms();
-                        printf("\nnumber of active sms %d: %f total active sms=%f",i,m_cluster[i]->get_n_active_sms(),*active_sms);
-		  }
+
+            if (m_cluster[i]->get_not_completed() || get_more_cta_left()) {
+                  m_cluster[i]->core_cycle();
+                  *active_sms += m_cluster[i]->get_n_active_sms();
+                  numb_active_sms[i]+= m_cluster[i]->get_n_active_sms();
+                  fprintf(filee,"\nnumb_active_sms[%d]: %f",i,numb_active_sms[i]);
+            }
 //                  printf("\n*active_sms %d",*active_sms);
       // Update core icnt/cache stats for GPUWattch
       m_cluster[i]->get_icnt_stats(
           m_power_stats->pwr_mem_stat->n_simt_to_mem[CURRENT_STAT_IDX][i],
           m_power_stats->pwr_mem_stat->n_mem_to_simt[CURRENT_STAT_IDX][i]);
-      m_cluster[i]->get_cache_stats(
-          m_power_stats->pwr_mem_stat->core_cache_stats[CURRENT_STAT_IDX]);
+
       m_cluster[i]->get_current_occupancy(
           gpu_occupancy.aggregate_warp_slot_filled,
           gpu_occupancy.aggregate_theoretical_warp_slots);
+      float temp_t = 0;
+      for (unsigned k = 0; k < (int)(m_shader_config->num_shader() /
+                                     m_shader_config->n_simt_clusters); k++) {
+        temp_t += m_shader_stats->m_pipeline_duty_cycle
+                      [(int)(m_shader_config->num_shader() /
+                             m_shader_config->n_simt_clusters) *
+                           i +
+                       k];
+      }
+      temp_t = temp_t / (m_shader_config->num_shader() / m_shader_config->n_simt_clusters);
+      average_pipeline_duty_cycle_per_sm[i] += temp_t;
     }
   }
+
+  m_power_stats->pwr_mem_stat->core_cache_stats[CURRENT_STAT_IDX].clear();
+  for(unsigned i=0;i<m_shader_config->n_simt_clusters;i++) {
+    m_cluster[i]->get_cache_stats(
+        m_power_stats->pwr_mem_stat->core_cache_stats[CURRENT_STAT_IDX]);
+  }
+
+
+  fclose(filee);
   if (clock_mask & (CORE)) {
     float temp = 0;
-    // printf("\nnumber of the shader kire man : %d\n",m_shader_config->num_shader());
     for (unsigned i = 0; i < m_shader_config->num_shader(); i++) {
       temp += m_shader_stats->m_pipeline_duty_cycle[i];
     }
+
     temp = temp / m_shader_config->num_shader();
     //  printf("\nnumber of shaders in gpgpusim.cc: %d",m_shader_config->num_shader());
+
     *average_pipeline_duty_cycle = ((*average_pipeline_duty_cycle) + temp);
     // cout<<"Average pipeline duty cycle:
     // "<<*average_pipeline_duty_cycle<<endl;
@@ -1907,37 +1958,42 @@ void gpgpu_sim::cycle() {
 
     if (g_interactive_debugger_enabled) gpgpu_debug();
 
-    printf("\nm_config.gpu_stat_sample_freq %u",m_config.gpu_stat_sample_freq);
       // McPAT main cycle (interface with McPAT)
+
 #ifdef GPGPUSIM_POWER_MODEL
+
     if (m_config.g_power_simulation_enabled) {
-      mcpat_cycle(m_config, getShaderCoreConfig(), m_gpgpusim_wrapper,
+      freq_change = mcpat_cycle(m_config, getShaderCoreConfig(), m_gpgpusim_wrapper,
                   m_power_stats, m_config.gpu_stat_sample_freq,
                   gpu_tot_sim_cycle, gpu_sim_cycle, gpu_tot_sim_insn,
-                  gpu_sim_insn,m_cluster,m_shader_config->n_simt_cores_per_cluster,numb_active_sms,m_config.cluster_freq);
+                  gpu_sim_insn,m_cluster,m_shader_config->n_simt_cores_per_cluster\
+                  ,numb_active_sms,m_config.cluster_freq,average_pipeline_duty_cycle_per_sm,Total_exe_time,new_cluster_freq);
       }
 #endif
   }
-  for(unsigned j=0;j<m_shader_config->n_simt_clusters;j++)
-  {
-	  if (clock_mask & (CORE<<j)){
-		issue_block2core(j);
-	  }
-  }
+
+  issue_block2core(clock_mask);
+
   if (clock_mask & (CORE))
     decrement_kernel_latency();
 
     // Depending on configuration, invalidate the caches once all of threads are
     // completed.
-  int all_threads_complete;
-        for(unsigned j=0;j<m_shader_config->n_simt_clusters;j++)
-        {
-          all_threads_complete = 1;
+  int all_threads_complete=1;
+        for(unsigned j=0;j<m_shader_config->n_simt_clusters;j++) {
+          if (m_config.gpgpu_flush_l1_cache) {
+            if (clock_mask & (CORE << j)) {
+              if (m_cluster[j]->get_not_completed() == 0)
+                m_cluster[j]->cache_invalidate();
+            }
+          }
+
+
           if (m_config.gpgpu_flush_l1_cache) {
 //            if (clock_mask & (CORE<<j)){
-			if (m_cluster[j]->get_not_completed() == 0)
-			  m_cluster[j]->cache_invalidate();
-			else
+			if (m_cluster[j]->get_not_completed() != 0)
+//			  m_cluster[j]->cache_invalidate();
+//			else
 			  all_threads_complete = 0;
 //		  }
           }
@@ -2035,6 +2091,25 @@ void gpgpu_sim::cycle() {
     // launch device kernel
     gpgpu_ctx->device_runtime->launch_one_device_kernel();
 #endif
+
+    if(freq_change){
+      FILE * Final_freqs;
+      Final_freqs = fopen("/home/pouria/Desktop/G_GPU/DATA/Final_freqs.txt","a");
+      fprintf(Final_freqs,"\n\n\n**********\n");
+      fprintf(Final_freqs,"             ********sample count*********: %u\n",sample_count);
+      for(int i=0;i<m_shader_config->n_simt_clusters;i++) {
+        fprintf(Final_freqs,"\n%d: Original  %lf %1.12lf \tNew %lf %1.12lf",i,m_config.cluster_freq[i],
+                m_config.cluster_period[i],new_cluster_freq[i],1/new_cluster_freq[i]);
+      }
+      fclose(Final_freqs);
+      for(unsigned C_i=0 ; C_i < m_shader_config->n_simt_clusters; C_i++){
+
+        m_config.cluster_freq[C_i] = new_cluster_freq[C_i];
+        m_config.cluster_period[C_i] = 1/new_cluster_freq[C_i];
+      }
+      freq_change = false;
+      sample_count++;
+    }
 //  break;
   }
   }

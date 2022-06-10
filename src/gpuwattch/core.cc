@@ -6012,29 +6012,36 @@ void Core::compute(bool loop) {
            coredynp.num_pipelines / num_units);
 
   if (ifu->exist) {
-    if(loop)
+//    if(loop)
+
       Pipeline_energy += corepipe->power.readOp.dynamic *
                          (coredynp.num_pipelines * rtp_pipeline_coe / num_units);
+      FILE * file_final;
+      file_final = fopen("/home/pouria/Desktop/G_GPU/DATA/CORE_PIP_ifu.txt","a");
+      fprintf(file_final,"\n%2.10lf %2.10lf %d %2.10lf %2.10lf",Pipeline_energy,corepipe->power.readOp.dynamic,\
+                coredynp.num_pipelines,rtp_pipeline_coe,num_units);
+      fflush(file_final);
+      fclose(file_final);
     ifu->rt_power = ifu->rt_power + corepipe->power * pppm_t;
     rt_power = rt_power + ifu->rt_power;
   }
 
   if (lsu->exist) {
-    if(loop)
+//    if(loop)
       Pipeline_energy += corepipe->power.readOp.dynamic *
                          (coredynp.num_pipelines * rtp_pipeline_coe / num_units);
     lsu->rt_power = lsu->rt_power + corepipe->power * pppm_t;
     rt_power = rt_power + lsu->rt_power;
   }
   if (exu->exist) {
-    if(loop)
+//    if(loop)
       Pipeline_energy += corepipe->power.readOp.dynamic *
                          (coredynp.num_pipelines * rtp_pipeline_coe / num_units);
     exu->rt_power = exu->rt_power + corepipe->power * pppm_t;
     rt_power = rt_power + exu->rt_power;
   }
   if (mmu->exist) {
-    if(loop)
+//    if(loop)
       Pipeline_energy += corepipe->power.readOp.dynamic *
                          (coredynp.num_pipelines * rtp_pipeline_coe / num_units);
     mmu->rt_power = mmu->rt_power + corepipe->power * pppm_t;
@@ -6091,6 +6098,7 @@ void Core::computeEnergy(bool is_tdp) {
       Pipeline_energy +=
           corepipe->power.readOp.dynamic *
           (coredynp.num_pipelines * rtp_pipeline_coe / num_units);
+
       set_pppm(pppm_t,
                coredynp.num_pipelines / num_units * coredynp.IFU_duty_cycle,
                coredynp.num_pipelines / num_units,
@@ -6111,6 +6119,7 @@ void Core::computeEnergy(bool is_tdp) {
       Pipeline_energy +=
           corepipe->power.readOp.dynamic *
           (coredynp.num_pipelines * rtp_pipeline_coe / num_units);
+
       set_pppm(pppm_t,
                coredynp.num_pipelines / num_units * coredynp.LSU_duty_cycle,
                coredynp.num_pipelines / num_units,

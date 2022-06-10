@@ -1,0 +1,10 @@
+# DO NOT DELETE
+
+cuobjdumpInst.o: cuobjdumpInst.h /usr/include/string.h /usr/include/stdio.h
+cuobjdumpInst.o: /usr/include/stdlib.h
+cuobjdumpInstList.o: cuobjdumpInstList.h cuobjdumpInst.h
+cuobjdumpInstList.o: /usr/include/string.h /usr/include/stdio.h
+cuobjdumpInstList.o: /usr/include/stdlib.h
+cuobjdump_to_ptxplus.o: /usr/include/stdio.h cuobjdumpInstList.h
+cuobjdump_to_ptxplus.o: cuobjdumpInst.h /usr/include/string.h
+cuobjdump_to_ptxplus.o: /usr/include/stdlib.h

@@ -335,6 +335,10 @@ class gpgpu_sim_config : public power_config,
     gpu_runtime_stat_flag = 0;
     sscanf(gpgpu_runtime_stat, "%d:%x", &gpu_stat_sample_freq,
            &gpu_runtime_stat_flag);
+    FILE *file_stat = fopen("/home/pouria/Desktop/G_GPU/DATA/gpu_stat_sample_freq.txt","a");
+    fprintf(file_stat,"\ngpu_stat_sample_freq %u",gpu_stat_sample_freq);
+    fclose(file_stat);
+    gpu_stat_sample_freq = 1000;
     m_shader_config.init();
     ptx_set_tex_cache_linesize(m_shader_config.m_L1T_config.get_line_sz());
     m_memory_config.init();
@@ -572,7 +576,10 @@ class gpgpu_sim : public gpgpu_t {
   class gpgpu_context *gpgpu_ctx;
     double *cluster_time;
     bool *cluster_all;
-
+double Total_exe_time;
+double* new_cluster_freq;
+bool freq_change;
+unsigned sample_count;
  private:
   // clocks
   void reinit_clock_domains(void);
@@ -606,6 +613,7 @@ class gpgpu_sim : public gpgpu_t {
 
   unsigned m_last_cluster_issue;
   float *average_pipeline_duty_cycle;
+  float *average_pipeline_duty_cycle_per_sm;
   float *active_sms;
   // time of next rising edge
   double core_time;

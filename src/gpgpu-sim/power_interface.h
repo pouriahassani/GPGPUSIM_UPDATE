@@ -38,18 +38,125 @@
 void init_mcpat(const gpgpu_sim_config &config,
                 class gpgpu_sim_wrapper *wrapper, unsigned stat_sample_freq,
                 unsigned tot_inst, unsigned inst);
-void mcpat_cycle(const gpgpu_sim_config &config,
+bool mcpat_cycle(const gpgpu_sim_config &config,
                  const shader_core_config *shdr_config,
                  class gpgpu_sim_wrapper *wrapper,
                  class power_stat_t *power_stats, unsigned stat_sample_freq,
                  unsigned tot_cycle, unsigned cycle, unsigned tot_inst,
-                 unsigned inst,class simt_core_cluster **,int,float*,double*);
+                 unsigned inst,class simt_core_cluster **,int,float*,double*,float *,double &Total_exe_time,double *new_cluster_freq
+                 );
 void mcpat_reset_perf_count(class gpgpu_sim_wrapper *wrapper);
-void mcpat_cycle_power_calculation(const gpgpu_sim_config &config,
-                                   const shader_core_config *shdr_config,
-                                   class gpgpu_sim_wrapper *wrapper,
-                                   class power_stat_t *power_stats, unsigned stat_sample_freq,
-                                   unsigned tot_cycle, unsigned cycle, unsigned tot_inst,
-                                   unsigned inst,class simt_core_cluster **m_cluster,int shaders_per_cluster,float* numb_active_sms,double * cluster_freq,float*);
+void mcpat_cycle_power_calculation(double &Power,double &Throughput,int &constraint,double &power_time,
+                                     const class gpgpu_sim_wrapper *wrapper,
+                                     double * cluster_freq_new,double* base_cluster_freq
+                                   ,double Actual_power,double Total_Throughput);
 
 #endif /* POWER_INTERFACE_H_ */
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

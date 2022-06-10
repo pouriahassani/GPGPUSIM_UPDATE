@@ -2329,6 +2329,7 @@ class simt_core_cluster {
   void print_not_completed(FILE *fp) const;
   unsigned get_n_active_cta() const;
   unsigned get_n_active_sms() const;
+  shader_core_stats* get_m_stats(){return m_stats;}
   gpgpu_sim *get_gpu() { return m_gpu; }
 
   void display_pipeline(unsigned sid, FILE *fout, int print_mem, int mask);

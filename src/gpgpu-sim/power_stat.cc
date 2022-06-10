@@ -367,6 +367,7 @@ void power_stat_t::visualizer_print(gzFile visualizer_file) {
 void power_stat_t::print(FILE *fout) const {
   fprintf(fout, "average_pipeline_duty_cycle=%f\n",
           *m_average_pipeline_duty_cycle);
+
   pwr_core_stat->print(fout);
   pwr_mem_stat->print(fout);
 }

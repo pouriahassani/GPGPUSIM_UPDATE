@@ -859,6 +859,10 @@ void shader_core_ctx::decode() {
     m_warp[m_inst_fetch_buffer.m_warp_id]->inc_inst_in_pipeline();
     if (pI1) {
       m_stats->m_num_decoded_insn[m_sid]++;
+      FILE *file;
+      file = fopen("/home/pouria/Desktop/G_GPU/DATA/m_num_INTdecoded_insn.txt","a");
+      fprintf(file,"\n:%u: %u",m_sid,m_stats->m_num_decoded_insn[m_sid]);
+      fclose(file);
       if (pI1->oprnd_type == INT_OP) {
         m_stats->m_num_INTdecoded_insn[m_sid]++;
       } else if (pI1->oprnd_type == FP_OP) {
@@ -3355,8 +3359,12 @@ void shader_core_config::set_pipeline_latency() {
 
 void shader_core_ctx::cycle() {
   if (!isactive() && get_not_completed() == 0) return;
-
   m_stats->shader_cycles[m_sid]++;
+  FILE *file;
+  file = fopen("/home/pouria/Desktop/G_GPU/DATA/m_stats->shader_cycles.txt","a");
+  fprintf(file,"\n m_stats->shader_cycles[%u]: %ull",m_sid, m_stats->shader_cycles[m_sid]);
+  fclose(file);
+
   writeback();
   execute();
   read_operands();
@@ -4131,13 +4139,16 @@ simt_core_cluster::simt_core_cluster(class gpgpu_sim *gpu, unsigned cluster_id,
 }
 
 void simt_core_cluster::core_cycle() {
-int i=0;
+  FILE *file;
+  file = fopen("/home/pouria/Desktop/G_GPU/DATA/Shader_turn.txt","a");
+
   for (std::list<unsigned>::iterator it = m_core_sim_order.begin();
        it != m_core_sim_order.end(); ++it) {
-      i+=1;
+    fprintf(file,"\n%u",*it);
+
     m_core[*it]->cycle();
   }
-//printf("\n***number of shaders per cluster: %d\n",i);
+  fclose(file);
   if (m_config->simt_core_sim_order == 1) {
     m_core_sim_order.splice(m_core_sim_order.end(), m_core_sim_order,
                             m_core_sim_order.begin());
@@ -4313,14 +4324,20 @@ void simt_core_cluster::icnt_inject_request_packet(class mem_fetch *mf) {
 }
 
 void simt_core_cluster::icnt_cycle() {
+  FILE *file;
+  file = fopen("/home/pouria/Desktop/G_GPU/DATA/icnt_cycle.txt","a");
+
   if (!m_response_fifo.empty()) {
+    fprintf(file,"\nCluster Id: %u",m_cluster_id);
     mem_fetch *mf = m_response_fifo.front();
     unsigned cid = m_config->sid_to_cid(mf->get_sid());
+//    fprintf(file,"\n!m_response_fifo.empty(): %u",mf->get_sid());
     if (mf->get_access_type() == INST_ACC_R) {
       // instruction fetch response
       if (!m_core[cid]->fetch_unit_response_buffer_full()) {
         m_response_fifo.pop_front();
         m_core[cid]->accept_fetch_response(mf);
+//        fprintf(file,"\n!m_response_fifo.empty(): %u",mf->get_sid());
       }
     } else {
       // data response
@@ -4328,9 +4345,11 @@ void simt_core_cluster::icnt_cycle() {
         m_response_fifo.pop_front();
         m_memory_stats->memlatstat_read_done(mf);
         m_core[cid]->accept_ldst_unit_response(mf);
+//        fprintf(file,"\n!m_response_fifo.empty(): %u",mf->get_sid());
       }
     }
   }
+  fclose(file);
   if (m_response_fifo.size() < m_config->n_simt_ejection_buffer_size) {
     mem_fetch *mf = (mem_fetch *)::icnt_pop(m_cluster_id);
     if (!mf) return;

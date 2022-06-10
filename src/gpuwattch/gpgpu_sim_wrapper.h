@@ -72,7 +72,8 @@ class gpgpu_sim_wrapper {
   void dump();
   void print_trace_files();
   void update_components_power(int x);
-  void update_components_power_per_core(bool);
+  void update_components_power_per_core(bool,double);
+  double sum_per_sm_and_shard_power(double*);
   void update_coefficients_per_core();
   void smp_cpm_pwr_print();
   void update_coefficients();
@@ -87,8 +88,8 @@ class gpgpu_sim_wrapper {
   void set_inst_power(bool clk_gated_lanes, double tot_cycles,
                       double busy_cycles, double tot_inst, double int_inst,
                       double fp_inst, double load_inst, double store_inst,
-                      double committed_inst,double *,double *,double *,double *,double *);
-  void set_regfile_power(double reads, double writes, double ops,double *,double *,double *);
+                      double committed_inst,double *,double *,double *,double *,double *,unsigned);
+  void set_regfile_power(double reads, double writes, double ops,double *,double *,double * );
   void set_icache_power(double accesses, double misses);
   void set_ccache_power(double accesses, double misses);
   void set_tcache_power(double accesses, double misses);
@@ -98,19 +99,24 @@ class gpgpu_sim_wrapper {
   void set_l2cache_power(double read_accesses, double read_misses,
                          double write_accesses, double write_misses);
   void set_idle_core_power(double num_idle_core,float*);
-  void set_duty_cycle_power(double duty_cycle);
+  void set_duty_cycle_power(double duty_cycle,float*);
   void set_mem_ctrl_power(double reads, double writes, double dram_precharge);
   void set_exec_unit_power(double fpu_accesses, double ialu_accesses,
                            double sfu_accesses,double *,double *,double *);
   void set_active_lanes_power(double sp_avg_active_lane,
                               double sfu_avg_active_lane,float *,float *,int);
-  void set_NoC_power(double noc_tot_reads, double noc_tot_write);
+  void set_NoC_power(double noc_tot_reads, double noc_tot_write,double*,double *);
   bool sanity_check(double a, double b);
-  double * cluster_freq;
+  double * n_cluster_freq;
   double *power_per_core;
   double per_core_power_calculation(double *Cluster_freq);
   unsigned number_shaders;
   double sum_pwr_cores;
+  double sample_cmp_pwr_Shrd;
+  double sample_cmp_pwr_idle;
+  double sample_cmp_pwr_const;
+  std::vector<double> sample_cmp_pwr_S;
+  std::vector<double> Throughput;
     Processor** proc_cores;
     ParseXML** p_cores;
  private:

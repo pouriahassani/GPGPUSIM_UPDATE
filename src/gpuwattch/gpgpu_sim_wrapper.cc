@@ -78,7 +78,9 @@ gpgpu_sim_wrapper::gpgpu_sim_wrapper(bool power_simulation_enabled,
   gpu_tot_power = init;  // Global powers
 
   sample_cmp_pwr.resize(NUM_COMPONENTS_MODELLED, 0);
+  Throughput.resize(number_shader);
   sample_cmp_pwr_per_core.resize(number_shader);
+  sample_cmp_pwr_S.resize(number_shader);
   for(int i=0;i<number_shader;i++)
     sample_cmp_pwr_per_core[i].resize(NUM_COMPONENTS_MODELLED,0);
   //printf("\nnumber of shader %d",number_shader);
@@ -100,7 +102,7 @@ gpgpu_sim_wrapper::gpgpu_sim_wrapper(bool power_simulation_enabled,
   g_power_per_cycle_dump = false;
   gpu_steady_power_deviation = 0;
   gpu_steady_min_period = 0;
-  cluster_freq = m_cluster_freq;
+  n_cluster_freq = m_cluster_freq;
   gpu_stat_sample_freq = 0;
   p = new ParseXML();
   p_cores = (ParseXML**)malloc(sizeof(ParseXML*)*number_shader);
@@ -111,7 +113,7 @@ gpgpu_sim_wrapper::gpgpu_sim_wrapper(bool power_simulation_enabled,
     for(int i=0;i<number_shader;i++) {
       p_cores[i] = new ParseXML();
       p_cores[i]->parse(xml_filename);
-      p_cores[i]->sys.core[0].clock_rate = (int)(cluster_freq[i]/((1<<20)));
+      p_cores[i]->sys.core[0].clock_rate = (int)(n_cluster_freq[i]/((1e6)));
 
     }
   }
@@ -182,7 +184,7 @@ void gpgpu_sim_wrapper::init_mcpat(
     // p->sys.total_cycles=gpu_stat_sample_freq*4;
     p->sys.total_cycles = gpu_stat_sample_freq;
     for(int i=0;i<number_shaders;i++)
-      p_cores[i]->sys.total_cycles = gpu_stat_sample_freq*cluster_freq[i]/cluster_freq[0];
+      p_cores[i]->sys.total_cycles = gpu_stat_sample_freq*n_cluster_freq[i]/n_cluster_freq[0];
 
 
     power_trace_file = NULL;
@@ -271,20 +273,31 @@ void gpgpu_sim_wrapper::set_inst_power(bool clk_gated_lanes, double tot_cycles,
                                        double load_inst, double store_inst,
                                        double committed_inst,
                                        double *tot_ins_set_inst_power,double *total_int_ins_set_inst_power,
-                                       double *tot_fp_ins_set_inst_power,double *tot_commited_ins_set_inst_power,double* cluster_freq) {
+                                       double *tot_fp_ins_set_inst_power,double *tot_commited_ins_set_inst_power,double* cluster_freq, unsigned stat_sample_freq) {
 
-  p->sys.core[0].clock_rate =  (int)(cluster_freq[0]/((1<<20)));
+  p->sys.core[0].clock_rate =  (int)(cluster_freq[0]/((1e6)));
   p->sys.core[0].gpgpu_clock_gated_lanes = clk_gated_lanes;
   p->sys.core[0].total_cycles = tot_cycles;
   p->sys.core[0].busy_cycles = busy_cycles;
+
 FILE * file;
-file = fopen("/home/pouria/Desktop/G_GPU/original_freq_per_sm/src/gpgpu-sim/total_cycle.txt","a");
-fprintf(file,"\n");
+file = fopen("/home/pouria/Desktop/G_GPU/DATA/Data_from_set_functions.txt","a");
+fprintf(file,"\n********set_inst_power**********");
+fprintf(file,"\nclk_gated_lanes: %i",clk_gated_lanes);
+fprintf(file,"\ntot_cycles: %10.7lf",tot_cycles);
+fprintf(file,"\nbusy_cycles: %10.7lf",busy_cycles);
+fprintf(file,"\nint_inst: %10.7lf",int_inst);
+fprintf(file,"\nfp_inst: %10.7lf",fp_inst);
+fprintf(file,"\nload_inst: %10.7lf",load_inst);
+fprintf(file,"\nstore_inst: %10.7lf",store_inst);
+fprintf(file,"\ncommitted_inst: %10.7lf",committed_inst);
+fclose(file);
 
   for(int i=0;i<number_shaders;i++)
   {
+    Throughput[i] = tot_ins_set_inst_power[i]/ (cluster_freq[i]/cluster_freq[0]);
      printf("\nclock rate wrapper is : %d",p_cores[i]->sys.core[0].clock_rate);
-    p_cores[i]->sys.core[0].clock_rate =  (int)(cluster_freq[i]/((1<<20)));
+    p_cores[i]->sys.core[0].clock_rate =  (int)(cluster_freq[i]/((1e6)));
     p_cores[i]->sys.total_cycles = tot_cycles*cluster_freq[i]/cluster_freq[0];
     p_cores[i]->sys.core[0].gpgpu_clock_gated_lanes = clk_gated_lanes;
     p_cores[i]->sys.core[0].total_cycles = tot_cycles*cluster_freq[i]/cluster_freq[0];
@@ -295,12 +308,12 @@ fprintf(file,"\n");
         total_int_ins_set_inst_power[i] * p_cores[i]->sys.scaling_coefficients[FP_INT];
     p_cores[i]->sys.core[0].fp_instructions =
         tot_fp_ins_set_inst_power[i] * p_cores[i]->sys.scaling_coefficients[FP_INT];
-    p_cores[i]->sys.core[0].load_instructions = load_inst;
-    p_cores[i]->sys.core[0].store_instructions = store_inst;
+    p_cores[i]->sys.core[0].load_instructions = 0;
+    p_cores[i]->sys.core[0].store_instructions = 0;
     p_cores[i]->sys.core[0].committed_instructions = tot_commited_ins_set_inst_power[i];
 //    fprintf(file,"%lf ",p_cores[i]->sys.core[0].total_cycles);
   }
-  fclose(file);
+
   p->sys.core[0].total_instructions =
       tot_inst * p->sys.scaling_coefficients[TOT_INST];
   p->sys.core[0].int_instructions =
@@ -312,17 +325,6 @@ fprintf(file,"\n");
   p->sys.core[0].committed_instructions = committed_inst;
   sample_perf_counters[FP_INT] = int_inst + fp_inst;
   sample_perf_counters[TOT_INST] = tot_inst;
-  printf("\nset_inst_power");
-  for(int i=0;i<number_shaders;i++){
-  printf("\n%d %lf %lf %lf %lf %lf %lf %lf %lf",p_cores[i]->sys.core[0].gpgpu_clock_gated_lanes,p_cores[i]->sys.core[0].total_cycles\
- , p_cores[i]->sys.core[0].busy_cycles, p_cores[i]->sys.core[0].total_instructions, p_cores[i]->sys.core[0].int_instructions\
- ,p_cores[i]->sys.core[0].fp_instructions, p_cores[i]->sys.core[0].load_instructions\
- ,p_cores[i]->sys.core[0].store_instructions,p_cores[i]->sys.core[0].committed_instructions);
-  }
-  printf("\n%d %lf %lf %lf %lf %lf %lf %lf %lf",p->sys.core[0].gpgpu_clock_gated_lanes,p->sys.core[0].total_cycles\
-         , p->sys.core[0].busy_cycles, p->sys.core[0].total_instructions, p->sys.core[0].int_instructions\
-         ,p->sys.core[0].fp_instructions, p->sys.core[0].load_instructions\
-         ,p->sys.core[0].store_instructions,p->sys.core[0].committed_instructions);
 }
 
 void gpgpu_sim_wrapper::set_regfile_power(double reads, double writes,
@@ -336,6 +338,13 @@ void gpgpu_sim_wrapper::set_regfile_power(double reads, double writes,
 
  // printf("\n p->sys.core[0].clock_rate: %d", p->sys.core[0].clock_rate);
 
+  FILE * file;
+  file = fopen("/home/pouria/Desktop/G_GPU/DATA/Data_from_set_functions.txt","a");
+  fprintf(file,"\n********set_regfile_power**********");
+  fprintf(file,"\nreads: %10.7lf",reads);
+  fprintf(file,"\nwrites: %10.7lf",writes);
+  fprintf(file,"\nops: %10.7lf",ops);
+  fclose(file);
 
   //  Per core data
   for(int i=0;i<number_shaders;i++)
@@ -371,13 +380,19 @@ void gpgpu_sim_wrapper::set_icache_power(double hits, double misses) {
 
   for(int i=0;i<number_shaders;i++){
     p_cores[i]->sys.core[0].icache.read_accesses =
-        hits * p_cores[i]->sys.scaling_coefficients[IC_H] +
-        misses * p_cores[i]->sys.scaling_coefficients[IC_M];
+        0 * p_cores[i]->sys.scaling_coefficients[IC_H] +
+        0 * p_cores[i]->sys.scaling_coefficients[IC_M];
     p_cores[i]->sys.core[0].icache.read_misses =
-        misses * p_cores[i]->sys.scaling_coefficients[IC_M];
+        0 * p_cores[i]->sys.scaling_coefficients[IC_M];
   }
   sample_perf_counters[IC_H] = hits;
   sample_perf_counters[IC_M] = misses;
+  FILE * file;
+  file = fopen("/home/pouria/Desktop/G_GPU/DATA/Data_from_set_functions.txt","a");
+  fprintf(file,"\n********set_icache_power**********");
+  fprintf(file,"\nhits: %10.7lf",hits);
+  fprintf(file,"\nmisses: %10.7lf",misses);
+  fclose(file);
 }
 
 void gpgpu_sim_wrapper::set_ccache_power(double hits, double misses) {
@@ -389,15 +404,21 @@ void gpgpu_sim_wrapper::set_ccache_power(double hits, double misses) {
 
   for(int i=0;i<number_shaders;i++) {
     p_cores[i]->sys.core[0].ccache.read_accesses =
-        hits *p_cores[i]->sys.scaling_coefficients[CC_H] +
-        misses *  p_cores[i]->sys.scaling_coefficients[CC_M];
+        0 *p_cores[i]->sys.scaling_coefficients[CC_H] +
+        0 *  p_cores[i]->sys.scaling_coefficients[CC_M];
     p_cores[i]->sys.core[0].ccache.read_misses =
-        misses * p_cores[i]->sys.scaling_coefficients[CC_M];
+        0 * p_cores[i]->sys.scaling_coefficients[CC_M];
   }
   sample_perf_counters[CC_H] = hits;
   sample_perf_counters[CC_M] = misses;
   // TODO: coalescing logic is counted as part of the caches power (this is not
   // valid for no-caches architectures)
+  FILE * file;
+  file = fopen("/home/pouria/Desktop/G_GPU/DATA/Data_from_set_functions.txt","a");
+  fprintf(file,"\n********set_ccache_power**********");
+  fprintf(file,"\nhits: %10.7lf",hits);
+  fprintf(file,"\nmisses: %10.7lf",misses);
+  fclose(file);
 }
 
 void gpgpu_sim_wrapper::set_tcache_power(double hits, double misses) {
@@ -409,22 +430,32 @@ void gpgpu_sim_wrapper::set_tcache_power(double hits, double misses) {
 
   for(int i=0;i<number_shaders;i++) {
     p_cores[i]->sys.core[0].tcache.read_accesses =
-        hits * p_cores[i]->sys.scaling_coefficients[TC_H] +
-        misses * p_cores[i]->sys.scaling_coefficients[TC_M];
+        0 * p_cores[i]->sys.scaling_coefficients[TC_H] +
+        0 * p_cores[i]->sys.scaling_coefficients[TC_M];
     p_cores[i]->sys.core[0].tcache.read_misses =
-        misses * p_cores[i]->sys.scaling_coefficients[TC_M];
+        0 * p_cores[i]->sys.scaling_coefficients[TC_M];
   }
 
   sample_perf_counters[TC_H] = hits;
   sample_perf_counters[TC_M] = misses;
   // TODO: coalescing logic is counted as part of the caches power (this is not
   // valid for no-caches architectures)
+  FILE * file;
+  file = fopen("/home/pouria/Desktop/G_GPU/DATA/Data_from_set_functions.txt","a");
+  fprintf(file,"\n********set_tcache_power**********");
+  fprintf(file,"\nhits: %10.7lf",hits);
+  fprintf(file,"\nmisses: %10.7lf",misses);
+  fclose(file);
 }
 
 void gpgpu_sim_wrapper::set_shrd_mem_power(double accesses,double *shmem_read_set_power) {
   p->sys.core[0].sharedmemory.read_accesses =
       accesses * p->sys.scaling_coefficients[SHRD_ACC];
-
+  FILE * file;
+  file = fopen("/home/pouria/Desktop/G_GPU/DATA/Data_from_set_functions.txt","a");
+  fprintf(file,"\n********set_shrd_mem_power**********");
+  fprintf(file,"\naccesses: %10.7lf",accesses);
+  fclose(file);
   for(int i=0;i<number_shaders;i++) {
     p_cores[i]->sys.core[0].sharedmemory.read_accesses =
         shmem_read_set_power[i] * p_cores[i]->sys.scaling_coefficients[SHRD_ACC];
@@ -441,6 +472,16 @@ void gpgpu_sim_wrapper::set_shrd_mem_power(double accesses,double *shmem_read_se
 void gpgpu_sim_wrapper::set_l1cache_power(double read_hits, double read_misses,
                                           double write_hits,
                                           double write_misses) {
+
+  FILE * file;
+  file = fopen("/home/pouria/Desktop/G_GPU/DATA/Data_from_set_functions.txt","a");
+  fprintf(file,"\n********set_l1cache_power**********");
+  fprintf(file,"\nread_hits: %10.7lf",read_hits);
+  fprintf(file,"\nread_misses: %10.7lf",read_misses);
+  fprintf(file,"\nwrite_hits: %10.7lf",write_hits);
+  fprintf(file,"\nwrite_misses: %10.7lf",write_misses);
+  fclose(file);
+
   p->sys.core[0].dcache.read_accesses =
       read_hits * p->sys.scaling_coefficients[DC_RH] +
       read_misses * p->sys.scaling_coefficients[DC_RM];
@@ -455,15 +496,15 @@ void gpgpu_sim_wrapper::set_l1cache_power(double read_hits, double read_misses,
   //  Per core data
   for(int i=0;i<number_shaders;i++) {
     p_cores[i]->sys.core[0].dcache.read_accesses =
-        read_hits * p_cores[i]->sys.scaling_coefficients[DC_RH] +
-        read_misses * p_cores[i]->sys.scaling_coefficients[DC_RM];
+        0 * p_cores[i]->sys.scaling_coefficients[DC_RH] +
+        0 * p_cores[i]->sys.scaling_coefficients[DC_RM];
     p_cores[i]->sys.core[0].dcache.read_misses =
-        read_misses * p_cores[i]->sys.scaling_coefficients[DC_RM];
+        0 * p_cores[i]->sys.scaling_coefficients[DC_RM];
     p_cores[i]->sys.core[0].dcache.write_accesses =
-        write_hits * p_cores[i]->sys.scaling_coefficients[DC_WH] +
-        write_misses * p_cores[i]->sys.scaling_coefficients[DC_WM];
+        0 * p_cores[i]->sys.scaling_coefficients[DC_WH] +
+        0 * p_cores[i]->sys.scaling_coefficients[DC_WM];
     p_cores[i]->sys.core[0].dcache.write_misses =
-        write_misses * p_cores[i]->sys.scaling_coefficients[DC_WM];
+        0 * p_cores[i]->sys.scaling_coefficients[DC_WM];
   }
   sample_perf_counters[DC_RH] = read_hits;
   sample_perf_counters[DC_RM] = read_misses;
@@ -476,6 +517,15 @@ void gpgpu_sim_wrapper::set_l1cache_power(double read_hits, double read_misses,
 void gpgpu_sim_wrapper::set_l2cache_power(double read_hits, double read_misses,
                                           double write_hits,
                                           double write_misses) {
+  FILE * file;
+  file = fopen("/home/pouria/Desktop/G_GPU/DATA/Data_from_set_functions.txt","a");
+  fprintf(file,"\n********set_l2cache_power**********");
+  fprintf(file,"\nread_hits: %10.7lf",read_hits);
+  fprintf(file,"\nread_misses: %10.7lf",read_misses);
+  fprintf(file,"\nwrite_hits: %10.7lf",write_hits);
+  fprintf(file,"\nwrite_misses: %10.7lf",write_misses);
+  fclose(file);
+
   p->sys.l2.total_accesses = read_hits * p->sys.scaling_coefficients[L2_RH] +
                              read_misses * p->sys.scaling_coefficients[L2_RM] +
                              write_hits * p->sys.scaling_coefficients[L2_WH] +
@@ -490,18 +540,18 @@ void gpgpu_sim_wrapper::set_l2cache_power(double read_hits, double read_misses,
   p->sys.l2.write_misses = write_misses * p->sys.scaling_coefficients[L2_WM];
 
   for(int i=0;i<number_shaders;i++) {
-    p_cores[i]->sys.l2.total_accesses = read_hits * p_cores[i]->sys.scaling_coefficients[L2_RH] +
-                                        read_misses * p_cores[i]->sys.scaling_coefficients[L2_RM] +
-                                        write_hits * p_cores[i]->sys.scaling_coefficients[L2_WH] +
-                                        write_misses * p_cores[i]->sys.scaling_coefficients[L2_WM];
-    p_cores[i]->sys.l2.read_accesses = read_hits * p_cores[i]->sys.scaling_coefficients[L2_RH] +
-                                       read_misses * p_cores[i]->sys.scaling_coefficients[L2_RM];
-    p_cores[i]->sys.l2.write_accesses = write_hits * p_cores[i]->sys.scaling_coefficients[L2_WH] +
-                                        write_misses * p_cores[i]->sys.scaling_coefficients[L2_WM];
-    p_cores[i]->sys.l2.read_hits = read_hits * p_cores[i]->sys.scaling_coefficients[L2_RH];
-    p_cores[i]->sys.l2.read_misses = read_misses * p_cores[i]->sys.scaling_coefficients[L2_RM];
-    p_cores[i]->sys.l2.write_hits = write_hits * p_cores[i]->sys.scaling_coefficients[L2_WH];
-    p_cores[i]->sys.l2.write_misses = write_misses * p_cores[i]->sys.scaling_coefficients[L2_WM];
+    p_cores[i]->sys.l2.total_accesses = 0 * p_cores[i]->sys.scaling_coefficients[L2_RH] +
+                                        0 * p_cores[i]->sys.scaling_coefficients[L2_RM] +
+                                        0 * p_cores[i]->sys.scaling_coefficients[L2_WH] +
+                                        0 * p_cores[i]->sys.scaling_coefficients[L2_WM];
+    p_cores[i]->sys.l2.read_accesses = 0 * p_cores[i]->sys.scaling_coefficients[L2_RH] +
+                                       0 * p_cores[i]->sys.scaling_coefficients[L2_RM];
+    p_cores[i]->sys.l2.write_accesses = 0 * p_cores[i]->sys.scaling_coefficients[L2_WH] +
+                                        0 * p_cores[i]->sys.scaling_coefficients[L2_WM];
+    p_cores[i]->sys.l2.read_hits = 0 * p_cores[i]->sys.scaling_coefficients[L2_RH];
+    p_cores[i]->sys.l2.read_misses = 0 * p_cores[i]->sys.scaling_coefficients[L2_RM];
+    p_cores[i]->sys.l2.write_hits = 0 * p_cores[i]->sys.scaling_coefficients[L2_WH];
+    p_cores[i]->sys.l2.write_misses = 0 * p_cores[i]->sys.scaling_coefficients[L2_WM];
   }
 
   sample_perf_counters[L2_RH] = read_hits;
@@ -511,8 +561,15 @@ void gpgpu_sim_wrapper::set_l2cache_power(double read_hits, double read_misses,
 }
 
 void gpgpu_sim_wrapper::set_idle_core_power(double num_idle_core,float* idle_per_cluster) {
+  FILE * file;
+  file = fopen("/home/pouria/Desktop/G_GPU/DATA/Data_from_set_functions.txt","a");
+  fprintf(file,"\n********set_idle_core_power**********");
+  fprintf(file,"\nnum_idle_core: %10.7lf",num_idle_core);
+
+  fclose(file);
+
   p->sys.num_idle_cores = num_idle_core;
-FILE *file;
+
 file = fopen("/home/pouria/Desktop/G_GPU/original_freq_per_sm/src/gpgpu-sim/idlecore.txt","a");
 fprintf(file,"\nnum idle core %lf\n",num_idle_core);
   //  Per core data
@@ -529,20 +586,38 @@ fprintf(file,"\nnum idle core %lf\n",num_idle_core);
   sample_perf_counters[IDLE_CORE_N] = num_idle_core;
 }
 
-void gpgpu_sim_wrapper::set_duty_cycle_power(double duty_cycle) {
+void gpgpu_sim_wrapper::set_duty_cycle_power(double duty_cycle,float* duty_cycle_per_sm) {
+  FILE * file;
+  file = fopen("/home/pouria/Desktop/G_GPU/DATA/Data_from_set_pip_functions.txt","a");
+  fprintf(file,"\n********set_duty_cycle_power**********");
+//  fprintf(file,"\nduty_cycle: %10.7lf",duty_cycle);
+
+
   p->sys.core[0].pipeline_duty_cycle =
       duty_cycle * p->sys.scaling_coefficients[PIPE_A];
 
   //  Per core data
   for(int i=0;i<number_shaders;i++) {
     p_cores[i]->sys.core[0].pipeline_duty_cycle =
-        duty_cycle * p_cores[i]->sys.scaling_coefficients[PIPE_A];
+        duty_cycle_per_sm[i] * p_cores[i]->sys.scaling_coefficients[PIPE_A];
+    fprintf(file,"\nduty_cycle %d: %10.7lf",i,duty_cycle_per_sm[i]);
   }
+  fclose(file);
   sample_perf_counters[PIPE_A] = duty_cycle;
 }
 
 void gpgpu_sim_wrapper::set_mem_ctrl_power(double reads, double writes,
                                            double dram_precharge) {
+  FILE * file;
+  file = fopen("/home/pouria/Desktop/G_GPU/DATA/Data_from_set_functions.txt","a");
+  fprintf(file,"\n********set_mem_ctrl_power**********");
+  fprintf(file,"\nreads: %10.7lf",reads);
+  fprintf(file,"\nwrites: %10.7lf",writes);
+  fprintf(file,"\ndram_precharge: %10.7lf",dram_precharge);
+
+  fclose(file);
+
+
   p->sys.mc.memory_accesses = reads * p->sys.scaling_coefficients[MEM_RD] +
                               writes * p->sys.scaling_coefficients[MEM_WR];
   p->sys.mc.memory_reads = reads * p->sys.scaling_coefficients[MEM_RD];
@@ -550,11 +625,11 @@ void gpgpu_sim_wrapper::set_mem_ctrl_power(double reads, double writes,
   p->sys.mc.dram_pre = dram_precharge * p->sys.scaling_coefficients[MEM_PRE];
 
   for(int i=0;i<number_shaders;i++) {
-    p_cores[i]->sys.mc.memory_accesses = reads * p_cores[i]->sys.scaling_coefficients[MEM_RD] +
-                                         writes * p_cores[i]->sys.scaling_coefficients[MEM_WR];
-    p_cores[i]->sys.mc.memory_reads = reads * p_cores[i]->sys.scaling_coefficients[MEM_RD];
-    p_cores[i]->sys.mc.memory_writes = writes * p_cores[i]->sys.scaling_coefficients[MEM_WR];
-    p_cores[i]->sys.mc.dram_pre = dram_precharge * p_cores[i]->sys.scaling_coefficients[MEM_PRE];
+    p_cores[i]->sys.mc.memory_accesses = 0 * p_cores[i]->sys.scaling_coefficients[MEM_RD] +
+                                         0 * p_cores[i]->sys.scaling_coefficients[MEM_WR];
+    p_cores[i]->sys.mc.memory_reads = 0 * p_cores[i]->sys.scaling_coefficients[MEM_RD];
+    p_cores[i]->sys.mc.memory_writes = 0 * p_cores[i]->sys.scaling_coefficients[MEM_WR];
+    p_cores[i]->sys.mc.dram_pre = 0 * p_cores[i]->sys.scaling_coefficients[MEM_PRE];
   }
 
   sample_perf_counters[MEM_RD] = reads;
@@ -565,6 +640,15 @@ void gpgpu_sim_wrapper::set_mem_ctrl_power(double reads, double writes,
 void gpgpu_sim_wrapper::set_exec_unit_power(double fpu_accesses,
                                             double ialu_accesses,
                                             double sfu_accesses,double *fpu_accesses_per_cluster,double *ialu_accesses_per_cluster,double *sfu_accesses_per_cluster) {
+
+  FILE * file;
+  file = fopen("/home/pouria/Desktop/G_GPU/DATA/Data_from_set_functions.txt","a");
+  fprintf(file,"\n********set_exec_unit_power**********");
+  fprintf(file,"\nfpu_accesses: %10.7lf",fpu_accesses);
+  fprintf(file,"\nialu_accesses: %10.7lf",ialu_accesses);
+  fprintf(file,"\nsfu_accesses: %10.7lf",sfu_accesses);
+  fclose(file);
+
   p->sys.core[0].fpu_accesses =
       fpu_accesses * p->sys.scaling_coefficients[FPU_ACC];
   // Integer ALU (not present in Tesla)
@@ -578,6 +662,7 @@ void gpgpu_sim_wrapper::set_exec_unit_power(double fpu_accesses,
   {
     p_cores[i]->sys.core[0].fpu_accesses =
         fpu_accesses_per_cluster[i] * p_cores[i]->sys.scaling_coefficients[FPU_ACC];
+    // Integer ALU (not present in Tesla)
     // Integer ALU (not present in Tesla)
     p_cores[i]->sys.core[0].ialu_accesses =
         ialu_accesses_per_cluster[i] * p_cores[i]->sys.scaling_coefficients[SP_ACC];
@@ -595,6 +680,13 @@ void gpgpu_sim_wrapper::set_exec_unit_power(double fpu_accesses,
 void gpgpu_sim_wrapper::set_active_lanes_power(double sp_avg_active_lane,
                                                double sfu_avg_active_lane,float * sp_avg_active_lane_per_cluster,float * sfu_avg_active_lane_per_cluster,int stat_sample_freq) {
 
+  FILE * file;
+  file = fopen("/home/pouria/Desktop/G_GPU/DATA/Data_from_set_functions.txt","a");
+  fprintf(file,"\n********set_active_lanes_power**********");
+  fprintf(file,"\nsp_avg_active_lane: %10.7lf",sp_avg_active_lane);
+  fprintf(file,"\nsfu_avg_active_lane: %10.7lf",sfu_avg_active_lane);
+  fclose(file);
+
   p->sys.core[0].sp_average_active_lanes = sp_avg_active_lane;
   p->sys.core[0].sfu_average_active_lanes = sfu_avg_active_lane;
 
@@ -605,15 +697,22 @@ void gpgpu_sim_wrapper::set_active_lanes_power(double sp_avg_active_lane,
 }
 
 void gpgpu_sim_wrapper::set_NoC_power(double noc_tot_reads,
-                                      double noc_tot_writes) {
+                                      double noc_tot_writes,double*n_icnt_mem_to_simt_set_NoC_power,double *n_icnt_simt_to_mem_set_NoC_power) {
+  FILE * file;
+  file = fopen("/home/pouria/Desktop/G_GPU/DATA/Data_from_set_functions.txt","a");
+  fprintf(file,"\n********set_NoC_power**********");
+  fprintf(file,"\nnoc_tot_reads: %10.7lf",noc_tot_reads);
+  fprintf(file,"\nnoc_tot_writes: %10.7lf",noc_tot_writes);
+  fclose(file);
+
   p->sys.NoC[0].total_accesses =
       noc_tot_reads * p->sys.scaling_coefficients[NOC_A] +
       noc_tot_writes * p->sys.scaling_coefficients[NOC_A];
 
   for(int i=0;i<number_shaders;i++) {
     p_cores[i]->sys.NoC[0].total_accesses =
-        noc_tot_reads *  p_cores[i]->sys.scaling_coefficients[NOC_A] +
-        noc_tot_writes *  p_cores[i]->sys.scaling_coefficients[NOC_A];
+        n_icnt_mem_to_simt_set_NoC_power[i] *  p_cores[i]->sys.scaling_coefficients[NOC_A] +
+        n_icnt_simt_to_mem_set_NoC_power[i] *  p_cores[i]->sys.scaling_coefficients[NOC_A];
   }
 
   sample_perf_counters[NOC_A] = noc_tot_reads + noc_tot_writes;
@@ -690,6 +789,16 @@ void gpgpu_sim_wrapper::print_trace_files() {
   gzprintf(power_trace_file, "\n");
 
   close_files();
+
+  FILE* file;
+  file = fopen("/home/pouria/Desktop/G_GPU/DATA/Performance_counters.txt","a");
+  fprintf(file,"\n********************ROUND********************");
+  for (unsigned i = 0; i < num_perf_counters; ++i) {
+    if(i %(int)(num_perf_counters/4) == 0)
+      fprintf(file,"\n");
+    fprintf(file, "%f,", sample_perf_counters[i]);
+  }
+
 }
 
 void gpgpu_sim_wrapper::update_coefficients() {
@@ -957,6 +1066,7 @@ void gpgpu_sim_wrapper::update_coefficients_per_core() {
     const_dynamic_power =
         proc_cores[i]->get_const_dynamic_power() / (proc_cores[i]->cores[0]->executionTime);
 
+
     for (unsigned i = 0; i < num_perf_counters; i++) {
       initpower_coeff[i] /= (proc_cores[i]->cores[0]->executionTime);
       effpower_coeff[i] /= (proc_cores[i]->cores[0]->executionTime);
@@ -965,19 +1075,36 @@ void gpgpu_sim_wrapper::update_coefficients_per_core() {
 }
 
 void gpgpu_sim_wrapper::smp_cpm_pwr_print(){
-  for(int i=0;i<num_pwr_cmps;i++){
+  for(int i=0;i<number_shaders;i++){
     printf("\nTotal component %d: %lf",i,sample_cmp_pwr[i]);
-    for(int j=0;j<number_shaders;j++){
-      printf("\ncore %d component %d: %lf",j,i,sample_cmp_pwr_per_core[j][i]);
+    for(int j=0;j<num_pwr_cmps;j++){
+      printf("\ncore %d component %d: %lf",i,j,sample_cmp_pwr_per_core[i][j]);
     }
   }
 
 }
-void gpgpu_sim_wrapper::update_components_power_per_core(bool loop) {
-//  update_coefficients_per_core();
-sum_pwr_cores = 0;
+void gpgpu_sim_wrapper::update_components_power_per_core(bool loop,double base_freq) {
+  //  update_coefficients_per_core();
+
+  sample_cmp_pwr[IBP] = 0;
+  sample_cmp_pwr[SHRDP] = 0;
+  sample_cmp_pwr[RFP] = 0;
+  sample_cmp_pwr[SPP] = 0;
+  sample_cmp_pwr[SFUP] = 0;
+  sample_cmp_pwr[FPUP] = 0;
+  sample_cmp_pwr[SCHEDP] = 0;
+  sample_cmp_pwr[NOCP] = 0;
+  sample_cmp_pwr[PIPEP] = 0;
+  sample_cmp_pwr[IDLE_COREP] = 0;
+
+  FILE *file = fopen("/home/pouria/Desktop/G_GPU/DATA/PIPEP.txt","a");
+  FILE *file_pip;
+  file_pip = fopen("/home/pouria/Desktop/G_GPU/DATA/pip_energy.txt","a");
+  fprintf(file_pip,"\n***********************");
+  FILE* IBP_ = fopen("/home/pouria/Desktop/G_GPU/DATA/IBP.txt","a");
+  fprintf(IBP_,"\n***********************");
   for (int i = 0; i < number_shaders; i++) {
-    sample_cmp_pwr_per_core[i][IBP] =
+    sample_cmp_pwr[IBP] +=
         (proc_cores[i]->cores[0]->ifu->IB->rt_power.readOp.dynamic +
          proc_cores[i]->cores[0]->ifu->IB->rt_power.writeOp.dynamic +
          proc_cores[i]->cores[0]->ifu->ID_misc->rt_power.readOp.dynamic +
@@ -985,136 +1112,87 @@ sum_pwr_cores = 0;
          proc_cores[i]->cores[0]->ifu->ID_inst->rt_power.readOp.dynamic) /
         (proc_cores[i]->cores[0]->executionTime);
 
-    sample_cmp_pwr_per_core[i][ICP] =
-        proc_cores[i]->cores[0]->ifu->icache.rt_power.readOp.dynamic /
-        (proc_cores[i]->cores[0]->executionTime);
+    fprintf(IBP_,"\n%d %2.12lf %2.10lf %2.12lf",i,(proc_cores[i]->cores[0]->ifu->IB->rt_power.readOp.dynamic +
+                                  proc_cores[i]->cores[0]->ifu->IB->rt_power.writeOp.dynamic +
+                                  proc_cores[i]->cores[0]->ifu->ID_misc->rt_power.readOp.dynamic +
+                                  proc_cores[i]->cores[0]->ifu->ID_operand->rt_power.readOp.dynamic +
+                                  proc_cores[i]->cores[0]->ifu->ID_inst->rt_power.readOp.dynamic),
+            (proc_cores[i]->cores[0]->ifu->IB->rt_power.readOp.dynamic +
+             proc_cores[i]->cores[0]->ifu->IB->rt_power.writeOp.dynamic +
+             proc_cores[i]->cores[0]->ifu->ID_misc->rt_power.readOp.dynamic +
+             proc_cores[i]->cores[0]->ifu->ID_operand->rt_power.readOp.dynamic +
+             proc_cores[i]->cores[0]->ifu->ID_inst->rt_power.readOp.dynamic)/(proc_cores[i]->cores[0]->executionTime),(proc_cores[i]->cores[0]->executionTime));
 
-    sample_cmp_pwr_per_core[i][ICP] =
-        proc_cores[i]->cores[0]->ifu->icache.rt_power.readOp.dynamic /
-        (proc_cores[i]->cores[0]->executionTime);
-
-    sample_cmp_pwr_per_core[i][DCP] =
-        proc_cores[i]->cores[0]->lsu->dcache.rt_power.readOp.dynamic /
-        (proc_cores[i]->cores[0]->executionTime);
-
-    sample_cmp_pwr_per_core[i][TCP] =
-        proc_cores[i]->cores[0]->lsu->tcache.rt_power.readOp.dynamic /
-        (proc_cores[i]->cores[0]->executionTime);
-
-    sample_cmp_pwr_per_core[i][CCP] =
-        proc_cores[i]->cores[0]->lsu->ccache.rt_power.readOp.dynamic /
-        (proc_cores[i]->cores[0]->executionTime);
-
-    sample_cmp_pwr_per_core[i][SHRDP] =
+    sample_cmp_pwr[SHRDP] +=
         proc_cores[i]->cores[0]->lsu->sharedmemory.rt_power.readOp.dynamic /
         (proc_cores[i]->cores[0]->executionTime);
 
-    sample_cmp_pwr_per_core[i][RFP] =
+    sample_cmp_pwr[RFP] +=
         (proc_cores[i]->cores[0]->exu->rfu->rt_power.readOp.dynamic /
          (proc_cores[i]->cores[0]->executionTime)) *
-        (proc_cores[i]->cores[0]->exu->rf_fu_clockRate / proc_cores[i]->cores[0]->exu->clockRate);
-   // printf("\nsample_cmp_pwr_per_core[%d][RFP] =%lf  executionTime: %lf",i,sample_cmp_pwr_per_core[i][RFP],proc_cores[i]->cores[0]->executionTime);
-    sample_cmp_pwr_per_core[i][SPP] =
+        (proc_cores[i]->cores[0]->exu->rf_fu_clockRate /
+         proc_cores[i]->cores[0]->exu->clockRate);
+
+    sample_cmp_pwr[SPP] +=
         (proc_cores[i]->cores[0]->exu->exeu->rt_power.readOp.dynamic /
          (proc_cores[i]->cores[0]->executionTime)) *
-        (proc_cores[i]->cores[0]->exu->rf_fu_clockRate / proc_cores[i]->cores[0]->exu->clockRate);
+        (proc_cores[i]->cores[0]->exu->rf_fu_clockRate /
+         proc_cores[i]->cores[0]->exu->clockRate);
 
-    sample_cmp_pwr_per_core[i][SFUP] =
+    sample_cmp_pwr[SFUP] +=
         (proc_cores[i]->cores[0]->exu->mul->rt_power.readOp.dynamic /
          (proc_cores[i]->cores[0]->executionTime));
 
-    sample_cmp_pwr_per_core[i][FPUP] =
+    sample_cmp_pwr[FPUP] +=
         (proc_cores[i]->cores[0]->exu->fp_u->rt_power.readOp.dynamic /
          (proc_cores[i]->cores[0]->executionTime));
 
-    FILE* file;
-    file = fopen("/home/pouria/Desktop/G_GPU/original_freq_per_sm/src/gpgpu-sim/output_time.txt","a");
-    if(!loop)
-    fprintf(file,"\nFirst round");
-    fprintf(file,"\n%d: %lf",i,proc_cores[i]->cores[0]->executionTime);
-    fclose(file);
-printf("\nproc_cores[i]->cores[0]->executionTime:%lf",proc_cores[i]->cores[0]->executionTime);
-    sample_cmp_pwr_per_core[i][SCHEDP] =
+    sample_cmp_pwr[SCHEDP] +=
         proc_cores[i]->cores[0]->exu->scheu->rt_power.readOp.dynamic /
         (proc_cores[i]->cores[0]->executionTime);
 
-    sample_cmp_pwr_per_core[i][L2CP] =
-        (proc_cores[i]->XML->sys.number_of_L2s > 0)
-            ? proc_cores[i]->l2array[0]->rt_power.readOp.dynamic /
-                  (proc_cores[i]->cores[0]->executionTime)
-            : 0;
-
-    sample_cmp_pwr_per_core[i][MCP] =
-        (proc_cores[i]->mc->rt_power.readOp.dynamic -
-         proc_cores[i]->mc->dram->rt_power.readOp.dynamic) /
+    sample_cmp_pwr[NOCP] +=
+        proc_cores[i]->nocs[0]->rt_power.readOp.dynamic /
         (proc_cores[i]->cores[0]->executionTime);
 
-    sample_cmp_pwr_per_core[i][NOCP] = proc_cores[i]->nocs[0]->rt_power.readOp.dynamic /
-                                       (proc_cores[i]->cores[0]->executionTime);
+    sample_cmp_pwr[PIPEP] +=
+        proc_cores[i]->cores[0]->Pipeline_energy /
+        (proc->cores[0]->executionTime);
 
-    sample_cmp_pwr_per_core[i][DRAMP] =
-        proc_cores[i]->mc->dram->rt_power.readOp.dynamic /
+    FILE * file_final_ifu;
+    file_final_ifu = fopen("/home/pouria/Desktop/G_GPU/DATA/CORE_PIP_ifu.txt","a");
+      fprintf(file_final_ifu,"\n%d: %6.10lf %lf %2.10lf",i, proc_cores[i]->cores[0]->Pipeline_energy,proc_cores[i]->cores[0]->Pipeline_energy /
+                                                                proc->cores[0]->executionTime,proc->cores[0]->executionTime);
+    fflush(file_final_ifu);
+    fclose(file_final_ifu);
+
+if(base_freq == 700000000)
+    fprintf(file_pip,"\n%d: %lf",i,proc_cores[i]->cores[0]->Pipeline_energy /
+                                          (proc->cores[0]->executionTime)/15);
+
+    sample_cmp_pwr[IDLE_COREP] +=
+        proc_cores[i]->cores[0]->IdleCoreEnergy /
         (proc_cores[i]->cores[0]->executionTime);
-
-    sample_cmp_pwr_per_core[i][PIPEP] =
-        proc_cores[i]->cores[0]->Pipeline_energy / (proc_cores[i]->cores[0]->executionTime);
-
-    sample_cmp_pwr_per_core[i][IDLE_COREP] =
-        proc_cores[i]->cores[0]->IdleCoreEnergy / (proc_cores[i]->cores[0]->executionTime);
-
-    // This constant dynamic power (e.g., clock power) part is estimated via
-    // regression model.
-    sample_cmp_pwr_per_core[i][CONST_DYNAMICP] = 0;
-    double cnst_dyn =
-        proc_cores[i]->get_const_dynamic_power() / (proc_cores[i]->cores[0]->executionTime);
-    // If the regression scaling term is greater than the recorded constant
-    // dynamic power then use the difference (other portion already added to
-    // dynamic power). Else, all the constant dynamic power is accounted for, add nothing.
-    if (p_cores[i]->sys.scaling_coefficients[CONST_DYNAMICN] > cnst_dyn)
-      sample_cmp_pwr_per_core[i][CONST_DYNAMICP] =
-          (p_cores[i]->sys.scaling_coefficients[CONST_DYNAMICN] - cnst_dyn);
-
-    double sum_pwr_cmp = 0;
-    for (unsigned j = 0; j < num_pwr_cmps; j++) {
-      sum_pwr_cmp += sample_cmp_pwr_per_core[i][j];
-    }
-        printf("\nsum_pwr_cmp per core %lf", sum_pwr_cmp);
-      sum_pwr_cores += sum_pwr_cmp;
-      power_per_core[i] = sum_pwr_cmp;
-
-      file = fopen("/home/pouria/Desktop/G_GPU/original_freq_per_sm/src/gpgpu-sim/Final_power.txt","a");
-
-      if(i==0 && !loop)
-        fprintf(file,"\nFirst round\n%lf ",power_per_core[i]);
-      if(i != 0)
-        fprintf(file,"%lf ",power_per_core[i]);
-      else
-        fprintf(file,"\n%lf ",power_per_core[i]);
-      fclose(file);
   }
+  fprintf(file_pip,"\n%lf",sample_cmp_pwr[PIPEP]/15);
+  fclose(file_pip);
+  fclose(IBP_);
+  sample_cmp_pwr[PIPEP] /= number_shaders;
 
- // printf("\nall core %lf", sum_pwr_cores);
+  file = fopen("/home/pouria/Desktop/G_GPU/DATA/Components_power.txt","a");
+  fprintf(file,"\n*****************ROUND***************");
+  for(int i=0;i<num_pwr_cmps;i++) {
+    fprintf(file, "\n%s: %2.7lf ", pwr_cmp_label[i], sample_cmp_pwr[i]);
+  }
+  fprintf(file,"\n");
+
+  fclose(file);
 
 }
 void gpgpu_sim_wrapper::update_components_power(int x) {
   if(x)
-  update_coefficients();
+    update_coefficients();
   proc_power = proc->rt_power.readOp.dynamic;
-  //printf("\ncores in poorc->cores: %d\n",(int)(sizeof(proc->cores)/sizeof(proc->cores[0])));
-
-  sample_cmp_pwr[IBP] =
-      (proc->cores[0]->ifu->IB->rt_power.readOp.dynamic +
-       proc->cores[0]->ifu->IB->rt_power.writeOp.dynamic +
-       proc->cores[0]->ifu->ID_misc->rt_power.readOp.dynamic +
-       proc->cores[0]->ifu->ID_operand->rt_power.readOp.dynamic +
-       proc->cores[0]->ifu->ID_inst->rt_power.readOp.dynamic) /
-      (proc->cores[0]->executionTime);
-
-
-
-
-  sample_cmp_pwr[ICP] = proc->cores[0]->ifu->icache.rt_power.readOp.dynamic /
-                        (proc->cores[0]->executionTime);
 
   sample_cmp_pwr[ICP] = proc->cores[0]->ifu->icache.rt_power.readOp.dynamic /
                         (proc->cores[0]->executionTime);
@@ -1128,28 +1206,6 @@ void gpgpu_sim_wrapper::update_components_power(int x) {
   sample_cmp_pwr[CCP] = proc->cores[0]->lsu->ccache.rt_power.readOp.dynamic /
                         (proc->cores[0]->executionTime);
 
-  sample_cmp_pwr[SHRDP] =
-      proc->cores[0]->lsu->sharedmemory.rt_power.readOp.dynamic /
-      (proc->cores[0]->executionTime);
-
-  sample_cmp_pwr[RFP] =
-      (proc->cores[0]->exu->rfu->rt_power.readOp.dynamic /
-       (proc->cores[0]->executionTime)) *
-      (proc->cores[0]->exu->rf_fu_clockRate / proc->cores[0]->exu->clockRate);
-
-  sample_cmp_pwr[SPP] =
-      (proc->cores[0]->exu->exeu->rt_power.readOp.dynamic /
-       (proc->cores[0]->executionTime)) *
-      (proc->cores[0]->exu->rf_fu_clockRate / proc->cores[0]->exu->clockRate);
-//"\ne`xe clock rate i`s %lf clockrate is %d %d",proc->cores[0]->exu->clockRate,p->sys.core[0].clock_rate,p_cores[0]->sys.core[0].clock_rate);
-  sample_cmp_pwr[SFUP] = (proc->cores[0]->exu->mul->rt_power.readOp.dynamic /
-                          (proc->cores[0]->executionTime));
-
-  sample_cmp_pwr[FPUP] = (proc->cores[0]->exu->fp_u->rt_power.readOp.dynamic /
-                          (proc->cores[0]->executionTime));
-
-  sample_cmp_pwr[SCHEDP] = proc->cores[0]->exu->scheu->rt_power.readOp.dynamic /
-                           (proc->cores[0]->executionTime);
 
   sample_cmp_pwr[L2CP] = (proc->XML->sys.number_of_L2s > 0)
                              ? proc->l2array[0]->rt_power.readOp.dynamic /
@@ -1160,19 +1216,12 @@ void gpgpu_sim_wrapper::update_components_power(int x) {
                          proc->mc->dram->rt_power.readOp.dynamic) /
                         (proc->cores[0]->executionTime);
 
-  sample_cmp_pwr[NOCP] =
-      proc->nocs[0]->rt_power.readOp.dynamic / (proc->cores[0]->executionTime);
 
 
-printf("\nproc->cores[0]->executionTime:%lf",proc->cores[0]->executionTime);
   sample_cmp_pwr[DRAMP] =
       proc->mc->dram->rt_power.readOp.dynamic / (proc->cores[0]->executionTime);
 
-  sample_cmp_pwr[PIPEP] =
-      proc->cores[0]->Pipeline_energy / (proc->cores[0]->executionTime);
 
-  sample_cmp_pwr[IDLE_COREP] =
-      proc->cores[0]->IdleCoreEnergy / (proc->cores[0]->executionTime);
 
   // This constant dynamic power (e.g., clock power) part is estimated via
   // regression model.
@@ -1187,23 +1236,180 @@ printf("\nproc->cores[0]->executionTime:%lf",proc->cores[0]->executionTime);
     sample_cmp_pwr[CONST_DYNAMICP] =
         (p->sys.scaling_coefficients[CONST_DYNAMICN] - cnst_dyn);
 
-  proc_power += sample_cmp_pwr[CONST_DYNAMICP];
 
-  double sum_pwr_cmp = 0;
-  for (unsigned i = 0; i < num_pwr_cmps; i++) {
-    sum_pwr_cmp += sample_cmp_pwr[i];
-  }
+//  bool check = false;
+//
+//  check = sanity_check(sum_pwr_cmp, proc_power);
 
-  FILE* file;
-  file = fopen("/home/pouria/Desktop/G_GPU/original_freq_per_sm/src/gpgpu-sim/Final_power_total.txt","a");
-  fprintf(file,"\n%d sum_pwr_cmp %lf proc_power %lf",x,sum_pwr_cmp,proc_power);
-  fclose(file);
-  bool check = false;
-    printf("\nsum_pwr_cmp %lf proc_power %lf",sum_pwr_cmp,proc_power);
-  check = sanity_check(sum_pwr_cmp, proc_power);
 //  assert("Total Power does not equal the sum of the components\n" && (check));
 }
 
+//double gpgpu_sim_wrapper::sum_per_sm_and_shard_power(double* cluster_freq){
+//  double Total_power=0;
+//  FILE * file;
+//  file =  fopen("/home/pouria/Desktop/G_GPU/DATA/component_power.txt","a");
+//  fprintf(file,"\n*****************ROUND***************\n%lf",cluster_freq[0]);
+//  for(int i=0;i<num_pwr_cmps;i++) {
+//    Total_power += sample_cmp_pwr[i];
+//    printf("\n%d: %lf",i,sample_cmp_pwr[i]);
+//      fprintf(file, "\n%s: %2.7lf", pwr_cmp_label[i], sample_cmp_pwr[i]);
+//  }
+//  fclose(file);
+//  return Total_power;
+//}
+
+double gpgpu_sim_wrapper::sum_per_sm_and_shard_power(double* cluster_freq) {
+  double Power = 0;
+  for (int i = 0; i < number_shaders; i++) {
+    sample_cmp_pwr_S[i] = 0;
+  }
+  FILE * file_final;
+  file_final = fopen("/home/pouria/Desktop/G_GPU/DATA/FINAL.txt","a");
+  FILE * file_final_power;
+  file_final_power = fopen("/home/pouria/Desktop/G_GPU/DATA/FINAL_POWER.txt","a");
+  sample_cmp_pwr_const = 0;
+  sample_cmp_pwr_Shrd = 0;
+  for (int i = 0; i < number_shaders; i++) {
+
+           sample_cmp_pwr_S[i] += (proc_cores[i]->cores[0]->ifu->IB->rt_power.readOp.dynamic +
+                              proc_cores[i]->cores[0]->ifu->IB->rt_power.writeOp.dynamic +
+                              proc_cores[i]->cores[0]->ifu->ID_misc->rt_power.readOp.dynamic +
+                              proc_cores[i]->cores[0]->ifu->ID_operand->rt_power.readOp.dynamic +
+                              proc_cores[i]->cores[0]->ifu->ID_inst->rt_power.readOp.dynamic) /
+                             (proc_cores[i]->cores[0]->executionTime);
+
+
+           sample_cmp_pwr_S[i] +=
+               (proc_cores[i]->cores[0]->exu->rfu->rt_power.readOp.dynamic /
+            (proc_cores[i]->cores[0]->executionTime)) *
+               (proc_cores[i]->cores[0]->exu->rf_fu_clockRate /
+                proc_cores[i]->cores[0]->exu->clockRate);
+
+
+           sample_cmp_pwr_S[i] += proc_cores[i]->cores[0]->lsu->sharedmemory.rt_power.readOp.dynamic /
+               (proc_cores[i]->cores[0]->executionTime);
+
+
+
+           sample_cmp_pwr_S[i] +=
+               (proc_cores[i]->cores[0]->exu->exeu->rt_power.readOp.dynamic /
+                (proc_cores[i]->cores[0]->executionTime)) *
+               (proc_cores[i]->cores[0]->exu->rf_fu_clockRate /
+                proc_cores[i]->cores[0]->exu->clockRate);
+
+
+           sample_cmp_pwr_S[i] +=
+               (proc_cores[i]->cores[0]->exu->mul->rt_power.readOp.dynamic /
+                (proc_cores[i]->cores[0]->executionTime));
+
+
+           sample_cmp_pwr_S[i] +=
+               (proc_cores[i]->cores[0]->exu->fp_u->rt_power.readOp.dynamic /
+                (proc_cores[i]->cores[0]->executionTime));
+
+
+           sample_cmp_pwr_S[i] +=
+               proc_cores[i]->cores[0]->exu->scheu->rt_power.readOp.dynamic /
+               (proc_cores[i]->cores[0]->executionTime);
+
+
+           sample_cmp_pwr_S[i] +=
+               proc_cores[i]->nocs[0]->rt_power.readOp.dynamic /
+               (proc_cores[i]->cores[0]->executionTime);
+
+
+           sample_cmp_pwr_S[i] +=
+               proc_cores[i]->cores[0]->Pipeline_energy /
+               (proc->cores[0]->executionTime)/number_shaders;
+
+
+           sample_cmp_pwr_const +=
+               proc_cores[i]->cores[0]->IdleCoreEnergy /
+               (proc_cores[i]->cores[0]->executionTime);
+           Power +=  sample_cmp_pwr_S[i];
+//           fprintf(file_final,"\nsample_cmp_pwr_S[%d]: %lf",i,sample_cmp_pwr_S[i]);
+
+    }
+
+
+//    fprintf(file_final,"\nsample_cmp_pwr_Shrd: %lf %10.10lf %10.10lf",
+//            sample_cmp_pwr_Shrd,proc->cores[0]->ifu->icache.rt_power.readOp.dynamic,proc->cores[0]->executionTime);
+
+  sample_cmp_pwr_Shrd += proc->cores[0]->ifu->icache.rt_power.readOp.dynamic /
+                        (proc->cores[0]->executionTime);
+
+//  fprintf(file_final,"\nsample_cmp_pwr_Shrd: %lf %10.10lf %10.10lf",
+//          sample_cmp_pwr_Shrd,proc->cores[0]->lsu->dcache.rt_power.readOp.dynamic,proc->cores[0]->executionTime);
+
+  sample_cmp_pwr_Shrd += proc->cores[0]->lsu->dcache.rt_power.readOp.dynamic /
+                        (proc->cores[0]->executionTime);
+
+//  fprintf(file_final,"\nsample_cmp_pwr_Shrd: %lf %10.10lf %10.10lf",
+//          sample_cmp_pwr_Shrd,proc->cores[0]->lsu->tcache.rt_power.readOp.dynamic,proc->cores[0]->executionTime);
+
+  sample_cmp_pwr_Shrd += proc->cores[0]->lsu->tcache.rt_power.readOp.dynamic /
+                        (proc->cores[0]->executionTime);
+
+//  fprintf(file_final,"\nsample_cmp_pwr_Shrd: %lf %10.10lf %10.10lf",
+//          sample_cmp_pwr_Shrd,proc->cores[0]->lsu->ccache.rt_power.readOp.dynamic,proc->cores[0]->executionTime);
+
+  sample_cmp_pwr_Shrd += proc->cores[0]->lsu->ccache.rt_power.readOp.dynamic /
+                        (proc->cores[0]->executionTime);
+
+//  fprintf(file_final,"\nsample_cmp_pwr_Shrd: %lf %10.10lf %10.10lf",
+//          sample_cmp_pwr_Shrd,proc->l2array[0]->rt_power.readOp.dynamic,proc->cores[0]->executionTime);
+
+  sample_cmp_pwr_Shrd += (proc->XML->sys.number_of_L2s > 0)
+                             ? proc->l2array[0]->rt_power.readOp.dynamic /
+                                   (proc->cores[0]->executionTime)
+                             : 0;
+//  fprintf(file_final,"\nsample_cmp_pwr_Shrd: %lf %10.10lf %10.10lf",
+//          sample_cmp_pwr_Shrd,(proc->mc->rt_power.readOp.dynamic -
+//                                proc->mc->dram->rt_power.readOp.dynamic),proc->cores[0]->executionTime);
+
+  sample_cmp_pwr_Shrd += (proc->mc->rt_power.readOp.dynamic -
+                         proc->mc->dram->rt_power.readOp.dynamic) /
+                        (proc->cores[0]->executionTime);
+
+
+//  fprintf(file_final,"\nsample_cmp_pwr_Shrd: %lf %10.10lf %10.10lf",
+//          sample_cmp_pwr_Shrd,proc->mc->rt_power.readOp.dynamic,proc->cores[0]->executionTime);
+
+  sample_cmp_pwr_Shrd +=
+      proc->mc->dram->rt_power.readOp.dynamic / (proc->cores[0]->executionTime);
+
+//  fprintf(file_final,"\nsample_cmp_pwr_Shrd: %lf",sample_cmp_pwr_Shrd);
+
+
+  // This constant dynamic power (e.g., clock power) part is estimated via
+  // regression model.
+  sample_cmp_pwr[CONST_DYNAMICP] = 0;
+  double cnst_dyn =
+      proc->get_const_dynamic_power() / (proc->cores[0]->executionTime);
+  // If the regression scaling term is greater than the recorded constant
+  // dynamic power then use the difference (other portion already added to
+  // dynamic power). Else, all the constant dynamic power is accounted for, add
+  // nothing.
+  if (p->sys.scaling_coefficients[CONST_DYNAMICN] > cnst_dyn)
+    sample_cmp_pwr_const +=
+        (p->sys.scaling_coefficients[CONST_DYNAMICN] - cnst_dyn);
+  fprintf(file_final,"\nsample_cmp_pwr_const: %lf sample_cmp_pwr_Shrd: %lf sample_cmp_pwr_S: %lf power:\t %lf",
+          sample_cmp_pwr_const,sample_cmp_pwr_Shrd,Power,Power + sample_cmp_pwr_Shrd + sample_cmp_pwr_const);
+  Power += sample_cmp_pwr_Shrd + sample_cmp_pwr_const;
+  fprintf(file_final_power,"\n+ %lf",Power);
+
+
+//  fprintf(file_final,"\n**************\n");
+  fflush(file_final);
+  fclose(file_final);
+  fclose(file_final_power);
+  FILE* file_throughput = fopen("/home/pouria/Desktop/G_GPU/DATA/throughput.txt","a");
+  fprintf(file_throughput,"\n*************\n");
+  for(int i=0;i<number_shaders;i++)
+  fprintf(file_throughput,"\n%d %lf",i,Throughput[i]);
+  fclose(file_throughput);
+  return Power;
+}
 void gpgpu_sim_wrapper::compute(bool loop) {
   for(int i=0;i<number_shaders;i++){
     printf("\nCore %d",i);

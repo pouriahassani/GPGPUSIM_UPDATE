@@ -495,7 +495,7 @@ printf("\nnumber of the cores in processor file is: %d read is %lf",numCore, cor
         XML->sys.total_cycles / ((double)(XML->sys.core[i].clock_rate));
     printf("\nexecution time calculated in processor.compute is %lf",cores[i]->executionTime);
 
-    cores[i]->executionTime = cores[i]->executionTime/(double)(1<<20);
+    cores[i]->executionTime = cores[i]->executionTime/(double)(1e6);
     printf("\nclock rate: %d execution time: %2.10lf total cycle in processor file %lf",XML->sys.core[i].clock_rate ,cores[i]->executionTime,XML->sys.total_cycles);
     cores[i]->rt_power.reset();
       printf("\nnumber of the cores in processor file is: %d read is %dl",numCore, cores[i]->rt_power.readOp.dynamic);

@@ -138,20 +138,22 @@ class power_stat_t {
                memory_stats_t *memory_stats);
   void visualizer_print(gzFile visualizer_file);
   void print(FILE *fout) const;
-  void save_stats(int number_shaders,float* active_sms_per_cluster) {
+  void save_stats(int number_shaders,float* numb_active_sms,float* average_pipeline_duty_cycle_per_sm) {
     pwr_core_stat->save_stats();
     pwr_mem_stat->save_stats();
     *m_average_pipeline_duty_cycle = 0;
     *m_active_sms = 0;
-    for(int i=0;i<number_shaders;i++)
-      active_sms_per_cluster[i] = 0;
+    for (int i = 0; i < number_shaders; i++){
+      average_pipeline_duty_cycle_per_sm[i] = 0;
+      numb_active_sms[i] = 0;
+    }
   }
 
     unsigned get_total_inst(double * total_inst_per_core) {
         unsigned total_inst = 0;
-
-        // printf("\n*******\nnumber of the shaders for second time:%d\n",m_config->num_shader());
-        printf("\nnumber of shders in power stats: %d",m_config->num_shader());
+        FILE *file;
+        file = fopen("/home/pouria/Desktop/G_GPU/DATA/total_inst.txt","a");
+        fprintf(file,"\n********get_total_inst********");
         for (unsigned i = 0; i < m_config->num_shader(); i++) {
 
             total_inst += (pwr_core_stat->m_num_decoded_insn[CURRENT_STAT_IDX][i]) -
@@ -160,7 +162,10 @@ class power_stat_t {
             total_inst_per_core[i] =
                     (pwr_core_stat->m_num_decoded_insn[CURRENT_STAT_IDX][i]) -
                     (pwr_core_stat->m_num_decoded_insn[PREV_STAT_IDX][i]);
+            fprintf(file,"\n%u: %u %lf",i,(pwr_core_stat->m_num_decoded_insn[CURRENT_STAT_IDX][i]) -
+                                             (pwr_core_stat->m_num_decoded_insn[PREV_STAT_IDX][i]),total_inst_per_core[i]);
         }
+        fclose(file);
         return total_inst;
     }
     unsigned get_total_int_inst(double * total_inst_per_core) {
@@ -842,20 +847,24 @@ class power_stat_t {
     return total;
   }
 
-  long get_icnt_simt_to_mem() {
+  long get_icnt_simt_to_mem(double* n_icnt_simt_to_mem_set_NoC_power ) {
     long total = 0;
     for (unsigned i = 0; i < m_config->n_simt_clusters; ++i) {
       total += (pwr_mem_stat->n_simt_to_mem[CURRENT_STAT_IDX][i] -
                 pwr_mem_stat->n_simt_to_mem[PREV_STAT_IDX][i]);
+      n_icnt_simt_to_mem_set_NoC_power[i] = (pwr_mem_stat->n_simt_to_mem[CURRENT_STAT_IDX][i] -
+                                          pwr_mem_stat->n_simt_to_mem[PREV_STAT_IDX][i]);
     }
     return total;
   }
 
-  long get_icnt_mem_to_simt() {
+  long get_icnt_mem_to_simt(double* n_icnt_mem_to_simt_set_NoC_power) {
     long total = 0;
     for (unsigned i = 0; i < m_config->n_simt_clusters; ++i) {
       total += (pwr_mem_stat->n_mem_to_simt[CURRENT_STAT_IDX][i] -
                 pwr_mem_stat->n_mem_to_simt[PREV_STAT_IDX][i]);
+      n_icnt_mem_to_simt_set_NoC_power[i] = (pwr_mem_stat->n_mem_to_simt[CURRENT_STAT_IDX][i] -
+                                             pwr_mem_stat->n_mem_to_simt[PREV_STAT_IDX][i]);
     }
     return total;
   }
